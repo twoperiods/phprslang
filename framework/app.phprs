@@ -1,0 +1,49 @@
+<?phprs
+// Application bootstrap — HTTP server event loop with routing.
+
+// Run the PHPRS MVC application.
+// port: TCP port to listen on
+// route_methods: array of HTTP method strings (e.g. ["GET", "GET", "POST"])
+// route_patterns: array of URL patterns (e.g. ["/", "/users/{id}", "/users"])
+// route_handlers: array of handler names (strings matched by app_dispatch)
+function app_run(int $port, [string] $route_methods, [string] $route_patterns, [string] $route_handlers): void {
+    let $server = phprs_server_new($port);
+
+    if ($server < 0) {
+        echo "Failed to start server on port " . $port . "\n";
+        return;
+    }
+
+    echo "Server started on http://localhost:" . $port . "\n";
+    echo "Press Ctrl+C to stop.\n";
+
+    // Main accept loop
+    for (let mut $running = 1; $running == 1; ) {
+        let $client = phprs_server_accept($server);
+
+        if ($client >= 0) {
+            let $raw = phprs_socket_read($client, 65536);
+            let $method = phprs_http_method($raw);
+            let $path = phprs_http_path($raw);
+
+            // URL-decode the path
+            let $decoded_path = phprs_url_decode($path);
+
+            let $route_idx = router_find($method, $decoded_path, $route_methods, $route_patterns);
+
+            let $response = "";
+            if ($route_idx >= 0) {
+                let $handler_name = $route_handlers[$route_idx];
+                $response = app_dispatch($handler_name, $raw, $decoded_path);
+            } else {
+                $response = response_404();
+            }
+
+            phprs_socket_write($client, $response);
+            phprs_socket_close($client);
+        }
+    }
+
+    phprs_socket_close($server);
+}
+?>

@@ -1,0 +1,100 @@
+<?phprs
+// Router module — URL pattern matching and route dispatch.
+
+// Split a path like "/users/42/posts" by '/' into segments.
+// Returns the segment at the given index (0-based after the leading slash).
+// Example: router_segment("/users/42", 0) -> "users", router_segment("/users/42", 1) -> "42"
+function router_segment(string $path, int $index): string {
+    // Skip leading '/' for index 0
+    let $work = $path;
+    if (phprs_str_starts_with($work, "/")) {
+        $work = phprs_str_replace($work, "/", "");
+    }
+    // Now split by '/'
+    return phprs_str_split($work, "/", $index);
+}
+
+// Count the number of path segments.
+function router_segment_count(string $path): int {
+    let $work = $path;
+    if (phprs_str_starts_with($work, "/")) {
+        $work = phprs_str_replace($work, "/", "");
+    }
+    if ($work == "") {
+        return 0;
+    }
+    // Count segments by splitting
+    let mut $i = 0;
+    for (let mut $i = 0; $i < 20; $i = $i + 1) {
+        let $seg = phprs_str_split($work, "/", $i);
+        if ($seg == "") {
+            return $i;
+        }
+        // continue counting (implicit)
+    }
+    return 0;
+}
+
+// Check if a path matches a route pattern.
+// Pattern segments starting with '{' are parameter wildcards.
+// Example: router_path_matches("/users/42", "/users/{id}") -> 1
+function router_path_matches(string $path, string $pattern): int {
+    let $path_count = router_segment_count($path);
+    let $pat_count = router_segment_count($pattern);
+    if ($path_count != $pat_count) {
+        return 0;
+    }
+    let mut $i = 0;
+    for (let mut $i = 0; $i < $path_count; $i = $i + 1) {
+        let $path_seg = router_segment($path, $i);
+        let $pat_seg = router_segment($pattern, $i);
+        if (phprs_str_starts_with($pat_seg, "{")) {
+            // Wildcard — matches anything, skip comparison
+            let $_wildcard = 1;
+        } else {
+            if ($path_seg != $pat_seg) {
+                return 0;
+            }
+        }
+    }
+    return 1;
+}
+
+// Extract URL parameters from a path matched against a pattern.
+// Returns a flat key=value string:  key1=val1&key2=val2
+// Example: router_extract_params("/users/42", "/users/{id}") -> "id=42"
+function router_extract_params(string $path, string $pattern): string {
+    let $path_count = router_segment_count($path);
+    let mut $result = "";
+    let mut $i = 0;
+    for (let mut $i = 0; $i < $path_count; $i = $i + 1) {
+        let $path_seg = router_segment($path, $i);
+        let $pat_seg = router_segment($pattern, $i);
+        if (phprs_str_starts_with($pat_seg, "{")) {
+            // Extract param name (strip { and })
+            let $name = phprs_str_replace($pat_seg, "{", "");
+            $name = phprs_str_replace($name, "}", "");
+            if ($result != "") {
+                $result = $result . "&";
+            }
+            $result = $result . $name . "=" . $path_seg;
+        }
+    }
+    return $result;
+}
+
+// Find matching route index from parallel arrays.
+// Returns -1 if no match found.
+function router_find(string $method, string $path, [string] $methods, [string] $patterns): int {
+    let $count = count($methods);
+    let mut $i = 0;
+    for (let mut $i = 0; $i < $count; $i = $i + 1) {
+        if ($methods[$i] == $method) {
+            if (router_path_matches($path, $patterns[$i])) {
+                return $i;
+            }
+        }
+    }
+    return -1;
+}
+?>

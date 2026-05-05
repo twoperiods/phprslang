@@ -1,0 +1,54 @@
+<?phprs
+// WebSocket helpers for PHPRS MVC Framework
+// Requires: include "framework/runtime.phprs"
+
+// ---- Opcode Constants ----
+function ws_opcode_text(): int { return 1; }
+function ws_opcode_close(): int { return 8; }
+function ws_opcode_ping(): int { return 9; }
+function ws_opcode_pong(): int { return 10; }
+
+// Perform WebSocket handshake on a client connection.
+// Returns 1 if upgrade was successful and response was sent, 0 otherwise.
+function ws_accept(string $raw, int $client_fd): int {
+    if (phprs_is_websocket_upgrade($raw) == 1) {
+        let $response = phprs_ws_handshake_response($raw);
+        phprs_socket_write($client_fd, $response);
+        return 1;
+    }
+    return 0;
+}
+
+// Read the next message from a WebSocket connection.
+// Returns the frame data as "opcode:payload". Returns "-1:" on error or disconnect.
+function ws_read(int $fd): string {
+    return phprs_ws_read_frame($fd, 0);
+}
+
+// Send a text message on a WebSocket connection.
+function ws_send_text(int $fd, string $message): int {
+    return phprs_ws_write_frame($fd, $message, 1);
+}
+
+// Disconnect a WebSocket client cleanly (sends close frame, shuts down socket).
+function ws_disconnect(int $fd): void {
+    phprs_ws_close($fd);
+}
+
+// Extract the opcode from a frame string ("opcode:payload" format).
+function ws_frame_opcode(string $frame): int {
+    let $opcode_str = phprs_str_split($frame, ":", 0);
+    return match ($opcode_str) {
+        "1" => 1,
+        "8" => 8,
+        "9" => 9,
+        "10" => 10,
+        _ => -1,
+    };
+}
+
+// Extract the payload from a frame string ("opcode:payload" format).
+function ws_frame_payload(string $frame): string {
+    return phprs_str_split($frame, ":", 1);
+}
+?>

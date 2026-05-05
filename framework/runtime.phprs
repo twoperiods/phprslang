@@ -1,0 +1,182 @@
+<?phprs
+// PHPRS C Runtime FFI Declarations
+// All extern function declarations that bridge to the embedded C runtime.
+
+// ---- Socket Primitives ----
+extern function phprs_server_new(int $port): int;
+extern function phprs_server_accept(int $fd): int;
+extern function phprs_socket_read(int $fd, int $max_size): string;
+extern function phprs_socket_write(int $fd, string $data): int;
+extern function phprs_socket_close(int $fd): void;
+
+// ---- File I/O ----
+extern function phprs_file_read(string $path): string;
+extern function phprs_file_write(string $path, string $content): int;
+extern function phprs_file_exists(string $path): int;
+
+// ---- PHP-compatible File Functions ----
+extern function file_get_contents(string $path): string;
+extern function file_put_contents(string $path, string $content): int;
+extern function file_exists(string $path): bool;
+extern function is_dir(string $path): bool;
+extern function mkdir(string $path): bool;
+extern function unlink(string $path): bool;
+extern function basename(string $path): string;
+extern function dirname(string $path): string;
+extern function scandir(string $path): array;
+
+// ---- HTTP Parsing ----
+extern function phprs_http_method(string $raw): string;
+extern function phprs_http_path(string $raw): string;
+extern function phprs_http_header(string $raw, string $name): string;
+extern function phprs_http_body(string $raw): string;
+extern function phprs_url_decode(string $encoded): string;
+extern function phprs_request_parse(string $raw): string;
+extern function phprs_http_response(int $status_code, string $content_type, string $body): string;
+
+// ---- JSON Helpers (flat objects) ----
+extern function phprs_json_get_string(string $json, string $key): string;
+extern function phprs_json_get_int(string $json, string $key): int;
+
+// ---- Full JSON ----
+extern function json_encode(any $value): string;
+extern function json_decode(string $json): any;
+
+// ---- String Helpers ----
+extern function phprs_str_replace(string $s, string $from, string $to): string;
+extern function phprs_str_contains(string $haystack, string $needle): int;
+extern function phprs_str_split(string $s, string $delim, int $index): string;
+extern function phprs_str_starts_with(string $s, string $prefix): int;
+extern function phprs_str_ends_with(string $s, string $suffix): int;
+extern function phprs_str_upper(string $s): string;
+extern function phprs_str_lower(string $s): string;
+
+// ---- PHP-compatible String Functions ----
+extern function substr(string $s, int $start, int $length): string;
+extern function strpos(string $haystack, string $needle): int;
+extern function stripos(string $haystack, string $needle): int;
+extern function explode(string $delimiter, string $s): string;  // returns comma-separated
+extern function implode(string $glue, string $list): string;
+extern function str_repeat(string $s, int $count): string;
+extern function strtolower(string $s): string;
+extern function strtoupper(string $s): string;
+extern function htmlspecialchars(string $s): string;
+extern function strip_tags(string $s): string;
+extern function nl2br(string $s): string;
+extern function str_replace(string $search, string $replace, string $subject): string;
+extern function ltrim(string $s): string;
+extern function rtrim(string $s): string;
+extern function strrpos(string $haystack, string $needle): int;
+extern function ucfirst(string $s): string;
+extern function sprintf(string $fmt, string $a1, string $a2, string $a3, string $a4): string;
+extern function number_format(any $num, int $decimals): string;
+extern function urlencode(string $s): string;
+extern function urldecode(string $s): string;
+extern function parse_url(string $url): string;
+extern function http_build_query(any $data): string;
+extern function base64_encode(string $s): string;
+extern function base64_decode(string $s): string;
+extern function md5(string $s): string;
+extern function sha1(string $s): string;
+extern function uniqid(string $prefix): string;
+extern function sleep(int $seconds): void;
+extern function usleep(int $microseconds): void;
+extern function realpath(string $path): string;
+extern function is_file(string $path): int;
+extern function getcwd(): string;
+
+// ---- Array Functions ----
+extern function array_push(any $arr, any $val): array;
+extern function array_pop(array $arr): any;
+extern function array_shift(array $arr): any;
+extern function array_unshift(array $arr, any $val): array;
+extern function array_keys(any $arr): array;
+extern function array_values(any $arr): array;
+extern function array_merge(any $arr1, any $arr2): array;
+extern function array_flip(any $arr): dict;
+extern function in_array(any $needle, array $haystack, bool $strict): bool;
+extern function array_search(any $needle, any $haystack, bool $strict): any;
+extern function array_key_exists(any $key, any $arr): bool;
+extern function array_slice(array $arr, int $offset, int $length): array;
+extern function array_sum(array $arr): float;
+extern function array_unique(array $arr): array;
+extern function array_reverse(array $arr): array;
+extern function array_filter(array $arr): array;
+extern function array_map(any $callback, array $arr): array;
+extern function array_reduce(array $arr, any $callback, any $initial): any;
+extern function range(int $start, int $end, int $step): array;
+extern function sort(array $arr): array;
+extern function rsort(array $arr): array;
+extern function array_diff(array $a, array $b): array;
+extern function array_combine(array $keys, array $vals): dict;
+extern function array_column(array $rows, string $col): array;
+extern function array_fill(int $start, int $count, any $val): array;
+extern function array_rand(any $arr, int $count): any;
+extern function array_diff(array $a, array $b): array;
+extern function array_combine(array $keys, array $vals): dict;
+extern function array_column(array $rows, string $col): array;
+extern function array_fill(int $start, int $count, any $val): array;
+extern function array_rand(any $arr, int $count): any;
+
+// ---- Date/Time Functions ----
+extern function time(): int;
+extern function date(string $format, int $timestamp): string;
+extern function strtotime(string $datetime): int;
+extern function microtime(): string;
+
+// ---- Math Functions ----
+extern function abs(any $n): int;
+extern function ceil(float $n): int;
+extern function floor(float $n): int;
+extern function round(float $n, int $precision): float;
+extern function max(any $a, any $b): any;
+extern function min(any $a, any $b): any;
+extern function rand(int $min, int $max): int;
+extern function mt_rand(int $min, int $max): int;
+extern function pow(any $base, any $exp): float;
+extern function sqrt(float $n): float;
+
+// ---- WebSocket ----
+extern function phprs_is_websocket_upgrade(string $raw): int;
+extern function phprs_ws_handshake_response(string $raw): string;
+extern function phprs_ws_read_frame(int $fd, int $timeout_ms): string;
+extern function phprs_ws_write_frame(int $fd, string $payload, int $opcode): int;
+extern function phprs_ws_send_pong(int $fd, string $payload): int;
+extern function phprs_ws_close(int $fd): void;
+
+// ---- HTTP Client ----
+extern function phprs_dns_resolve(string $hostname): string;
+extern function phprs_tcp_connect(string $host, int $port): int;
+extern function phprs_tls_connect(string $host, int $port): int;
+extern function phprs_socket_read_all(int $fd): string;
+extern function phprs_http_build_request(string $method, string $host, string $path, string $headers, string $body): string;
+extern function phprs_http_response_status(string $raw): int;
+extern function phprs_http_response_body(string $raw): string;
+
+// ---- curl HTTP Client ----
+extern function curl(string $url, string $options): string;
+extern function curl_async(string $url, string $options): int;
+extern function curl_wait(int $handle): string;
+extern function curl_is_done(int $handle): int;
+
+// ---- Threading ----
+extern function phprs_thread_spawn(string $func_name, int $client_fd, string $raw_request): int;
+extern function phprs_thread_pool_init(int $num_threads): int;
+extern function phprs_thread_pool_enqueue(string $func_name, int $client_fd, string $raw_request): int;
+extern function phprs_thread_pool_shutdown(): void;
+extern function phprs_mutex_new(): int;
+extern function phprs_mutex_lock(int $handle): void;
+extern function phprs_mutex_unlock(int $handle): void;
+
+// ---- Type Checking ----
+extern function is_null(any $var): bool;
+extern function is_int(any $var): bool;
+extern function is_string(any $var): bool;
+extern function is_bool(any $var): bool;
+extern function is_float(any $var): bool;
+extern function is_array(any $var): bool;
+extern function gettype(any $var): string;
+extern function isset(any $var): bool;
+extern function empty(any $var): bool;
+extern function unset(any $var): void;
+?>

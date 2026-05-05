@@ -1,0 +1,51 @@
+<?phprs
+// Simple template engine — replaces {{placeholder}} patterns.
+
+// Replace a single {{key}} placeholder with a value.
+// Values are HTML-escaped by default to prevent XSS.
+// Use view_render_var_raw() to insert raw HTML.
+function view_render_var(string $template, string $key, string $value): string {
+    let $placeholder = "{{" . $key . "}}";
+    return phprs_str_replace($template, $placeholder, view_escape($value));
+}
+
+// Replace a {{key}} placeholder with raw (unescaped) HTML.
+// Only use with trusted content.
+function view_render_var_raw(string $template, string $key, string $value): string {
+    let $placeholder = "{{" . $key . "}}";
+    return phprs_str_replace($template, $placeholder, $value);
+}
+
+// HTML-escape a string: & < > " '
+function view_escape(string $s): string {
+    let $r = $s;
+    $r = phprs_str_replace($r, "&", "&amp;");
+    $r = phprs_str_replace($r, "<", "&lt;");
+    $r = phprs_str_replace($r, ">", "&gt;");
+    $r = phprs_str_replace($r, "\"", "&quot;");
+    $r = phprs_str_replace($r, "'", "&#039;");
+    return $r;
+}
+
+// Render a template with multiple key-value pairs.
+// keys: array of placeholder names (without {{ }})
+// values: array of replacement strings (parallel to keys)
+function view_render(string $template, [string] $keys, [string] $values): string {
+    let $result = $template;
+    let $count = count($keys);
+    let mut $i = 0;
+    for (let mut $i = 0; $i < $count; $i = $i + 1) {
+        $result = view_render_var($result, $keys[$i], $values[$i]);
+    }
+    return $result;
+}
+
+// Load and render a template file with multiple variables.
+function view_load(string $view_path, [string] $keys, [string] $values): string {
+    let $template = phprs_file_read($view_path);
+    if ($template == "") {
+        return "<html><body><h1>View not found: " . $view_path . "</h1></body></html>";
+    }
+    return view_render($template, $keys, $values);
+}
+?>

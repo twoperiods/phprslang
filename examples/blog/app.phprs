@@ -1,0 +1,183 @@
+<?phprs
+// PHPRS MVC Blog Application (MVP)
+// Build: phprs build examples/blog/app.phprs -o blog.exe
+// Run:   ./blog.exe
+// Note: Uses inlined framework logic to avoid array-parameter limitations.
+
+include "../../framework/runtime.phprs";
+
+// ---- Response Helpers ----
+function response_html(int $status, string $html): string {
+    return phprs_http_response($status, "text/html; charset=utf-8", $html);
+}
+
+function response_json(int $status, string $json): string {
+    return phprs_http_response($status, "application/json", $json);
+}
+
+function response_404(): string {
+    let $body = "<h1>404 Not Found</h1>";
+    return phprs_http_response(404, "text/html; charset=utf-8", $body);
+}
+
+// ---- Template renderer ----
+function render(string $tmpl, string $k1, string $v1): string {
+    let $ph = "{{" . $k1 . "}}";
+    return phprs_str_replace($tmpl, $ph, $v1);
+}
+
+function render2(string $tmpl, string $k1, string $v1, string $k2, string $v2): string {
+    let $tmp = render($tmpl, $k1, $v1);
+    return render($tmp, $k2, $v2);
+}
+
+// ---- Router ----
+function route_match(string $path, string $pattern): int {
+    let $work = $path;
+    if (phprs_str_starts_with($work, "/")) {
+        $work = phprs_str_replace($work, "/", "");
+    }
+    let $pat = $pattern;
+    if (phprs_str_starts_with($pat, "/")) {
+        $pat = phprs_str_replace($pat, "/", "");
+    }
+    let $path_seg0 = phprs_str_split($work, "/", 0);
+    let $pat_seg0 = phprs_str_split($pat, "/", 0);
+    if (phprs_str_starts_with($pat_seg0, "{")) {
+        return 1;
+    }
+    if ($path_seg0 != $pat_seg0) {
+        return 0;
+    }
+    return 1;
+}
+
+// ---- App Dispatch ----
+function app_dispatch(string $path): string {
+    return match ($path) {
+        "/" => home_page(),
+        "/about" => about_page(),
+        "/api/info" => api_info(),
+        "/api/echo" => api_echo(),
+        _ => response_404(),
+    };
+}
+
+// ---- Controllers ----
+function home_page(): string {
+    let $title = "Welcome to PHPRS MVC";
+    let $message = "This page is served by a compiled native binary web server!";
+
+    let $html = "<!DOCTYPE html>
+<html>
+<head>
+    <title>{{title}}</title>
+    <style>
+        body { font-family: sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; background: #fafafa; }
+        h1 { color: #4F46E5; }
+        .card { background: white; padding: 1.5rem; border-radius: 8px; margin: 1rem 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        code { background: #e8e8f0; padding: 0.2em 0.4em; border-radius: 4px; font-size: 0.9em; }
+        nav a { margin: 0 0.5rem; color: #4F46E5; text-decoration: none; }
+        hr { border: none; border-top: 1px solid #e0e0e0; margin: 2rem 0; }
+    </style>
+</head>
+<body>
+    <h1>{{title}}</h1>
+    <div class=\"card\">
+        <p>{{message}}</p>
+        <p>Try these endpoints:</p>
+        <ul>
+            <li><a href=\"/\">Home</a> — This page</li>
+            <li><a href=\"/about\">About</a> — Framework info</li>
+            <li><a href=\"/api/info\">API Info</a> — JSON response</li>
+            <li><a href=\"/api/echo\">API Echo</a> — Request echo</li>
+        </ul>
+    </div>
+    <nav>
+        <a href=\"/\">Home</a>
+        <a href=\"/about\">About</a>
+        <a href=\"/api/info\">API</a>
+    </nav>
+    <hr/>
+    <p><small>Powered by PHPRS — PHP-like syntax compiled to native code</small></p>
+</body>
+</html>";
+
+    return response_html(200, render2($html, "title", $title, "message", $message));
+}
+
+function about_page(): string {
+    let $html = "<!DOCTYPE html>
+<html>
+<head>
+    <title>About PHPRS MVC</title>
+    <style>
+        body { font-family: sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; background: #fafafa; }
+        h1 { color: #4F46E5; }
+        .card { background: white; padding: 1.5rem; border-radius: 8px; margin: 1rem 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    </style>
+</head>
+<body>
+    <h1>About PHPRS MVC</h1>
+    <div class=\"card\">
+        <h2>What is this?</h2>
+        <p>A web framework written in <strong>PHPRS</strong>, a new programming language that combines
+           PHP's simple syntax with Rust-like performance. The entire application compiles to a single native binary.</p>
+    </div>
+    <div class=\"card\">
+        <h2>Architecture</h2>
+        <ul>
+            <li><strong>Language:</strong> PHPRS (.phprs files)</li>
+            <li><strong>Compiler:</strong> Lexer → Parser → Type Checker → C Transpiler → MSVC/GCC → Native .exe</li>
+            <li><strong>Runtime:</strong> Embedded C runtime (sockets, HTTP, JSON, string helpers)</li>
+            <li><strong>Memory:</strong> No garbage collector — compiled with zero-cost abstractions</li>
+        </ul>
+    </div>
+    <nav>
+        <a href=\"/\">Home</a>
+        <a href=\"/about\">About</a>
+        <a href=\"/api/info\">API</a>
+    </nav>
+</body>
+</html>";
+    return response_html(200, $html);
+}
+
+function api_info(): string {
+    let $json = "{\"framework\":\"PHPRS MVC\", \"version\":\"0.1.0\", \"language\":\"PHPRS\", \"binary\":\"native\", \"server\":\"embedded C runtime\"}";
+    return response_json(200, $json);
+}
+
+function api_echo(): string {
+    let $json = "{\"message\":\"Hello from the API!\", \"timestamp\":\"2026-05-04\"}";
+    return response_json(200, $json);
+}
+
+// ---- Main Server Loop ----
+    let $server = phprs_server_new(8080);
+
+    if ($server < 0) {
+        echo "Failed to start server on port 8080\n";
+        return;
+    }
+
+    echo "=== PHPRS MVC Framework ===\n";
+    echo "Server started on http://localhost:8080\n";
+    echo "Press Ctrl+C to stop.\n";
+
+    for (let mut $running = 1; $running == 1; ) {
+        let $client = phprs_server_accept($server);
+
+        if ($client >= 0) {
+            let $raw = phprs_socket_read($client, 65536);
+            let $method = phprs_http_method($raw);
+            let $path = phprs_http_path($raw);
+
+            let $response = app_dispatch($path);
+            phprs_socket_write($client, $response);
+            phprs_socket_close($client);
+        }
+    }
+
+    phprs_socket_close($server);
+?>

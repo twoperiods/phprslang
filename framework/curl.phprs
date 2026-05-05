@@ -1,0 +1,27 @@
+<?phprs
+// PHPRS curl HTTP Client
+// Requires: include "framework/runtime.phprs"
+//
+// Direct usage (works in all contexts):
+//   $resp = curl($url, $opts)  - dict {status, headers, body, ?error}
+//   $h = curl_async($url, $opts) - int handle
+//   $resp = curl_wait($h)        - dict
+//   $done = curl_is_done($h)     - int (0 or 1)
+//
+// Options dict keys: method, body, headers, timeout
+// Example:
+//   $resp = curl("https://api.example.com/data", [
+//       "method" => "POST",
+//       "body" => "key=value",
+//       "headers" => "Authorization: Bearer token\r\n",
+//       "timeout" => 15
+//   ]);
+//   echo $resp["status"];  // 200
+//   echo $resp["body"];    // response content
+//
+// curl_async example:
+//   $h1 = curl_async("http://site1.com", []);
+//   $h2 = curl_async("http://site2.com", []);
+//   $r1 = curl_wait($h1);
+//   $r2 = curl_wait($h2);
+?>

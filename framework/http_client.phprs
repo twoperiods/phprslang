@@ -1,0 +1,113 @@
+<?phprs
+// PHPRS HTTP Client Helpers
+// Requires: include "framework/runtime.phprs"
+
+// Parse a URL into protocol, host and path components.
+// Returns "proto=PROTO&host=HOST&path=PATH" format string.
+// Example: http_parse_url("http://example.com/api/data") -> "proto=http&host=example.com&path=/api/data"
+function http_parse_url(string $url): string {
+    let mut $rest = $url;
+    let mut $proto = "http";
+    if (phprs_str_starts_with($rest, "https://") == 1) {
+        $rest = phprs_str_replace($rest, "https://", "");
+        $proto = "https";
+    } else {
+        if (phprs_str_starts_with($rest, "http://") == 1) {
+            $rest = phprs_str_replace($rest, "http://", "");
+            $proto = "http";
+        } else {
+            $rest = $rest;
+            $proto = "http";
+        }
+    }
+
+    let mut $host = $rest;
+    let mut $path = "/";
+    if (phprs_str_contains($rest, "/") == 1) {
+        $host = phprs_str_split($rest, "/", 0);
+        // Extract everything after the first "/" as the path
+        let $rest_of_path = phprs_str_replace($rest, $host . "/", "");
+        $path = "/" . $rest_of_path;
+    } else {
+        $host = $rest;
+        $path = "/";
+    }
+
+    return "proto=" . $proto . "&host=" . $host . "&path=" . $path;
+}
+
+// Extract protocol from parsed URL
+function http_parsed_proto(string $parsed): string {
+    let $proto_part = phprs_str_split($parsed, "&", 0);
+    return phprs_str_replace($proto_part, "proto=", "");
+}
+
+// Extract host from parsed URL
+function http_parsed_host(string $parsed): string {
+    // Parsed format: "proto=PROTO&host=HOST&path=PATH"
+    let $host_part = phprs_str_split($parsed, "&", 1);
+    return phprs_str_replace($host_part, "host=", "");
+}
+
+// Extract path from parsed URL
+function http_parsed_path(string $parsed): string {
+    // Parsed format: "proto=PROTO&host=HOST&path=PATH"
+    let $path_part = phprs_str_split($parsed, "&", 2);
+    return phprs_str_replace($path_part, "path=", "");
+}
+
+// Perform an HTTP GET request. Returns the raw HTTP response string.
+function http_get(string $url): string {
+    let $parsed = http_parse_url($url);
+    let $host = http_parsed_host($parsed);
+    let $path = http_parsed_path($parsed);
+    let $proto = http_parsed_proto($parsed);
+    let mut $fd = -1;
+    if ($proto == "https") {
+        $fd = phprs_tls_connect($host, 443);
+    } else {
+        $fd = phprs_tcp_connect($host, 80);
+    }
+    if ($fd < 0) {
+        return "HTTP/1.1 0 Connection Failed\r\n\r\n";
+    }
+    let $req = phprs_http_build_request("GET", $host, $path, "", "");
+    phprs_socket_write($fd, $req);
+    let $resp = phprs_socket_read_all($fd);
+    phprs_socket_close($fd);
+    return $resp;
+}
+
+// Perform an HTTP POST request with a JSON body.
+function http_post(string $url, string $body, string $content_type): string {
+    let $parsed = http_parse_url($url);
+    let $host = http_parsed_host($parsed);
+    let $path = http_parsed_path($parsed);
+    let $proto = http_parsed_proto($parsed);
+    let $headers = "Content-Type: " . $content_type . "\r\n";
+    let mut $fd = -1;
+    if ($proto == "https") {
+        $fd = phprs_tls_connect($host, 443);
+    } else {
+        $fd = phprs_tcp_connect($host, 80);
+    }
+    if ($fd < 0) {
+        return "HTTP/1.1 0 Connection Failed\r\n\r\n";
+    }
+    let $req = phprs_http_build_request("POST", $host, $path, $headers, $body);
+    phprs_socket_write($fd, $req);
+    let $resp = phprs_socket_read_all($fd);
+    phprs_socket_close($fd);
+    return $resp;
+}
+
+// Extract status code from a raw HTTP response.
+function http_status(string $response): int {
+    return phprs_http_response_status($response);
+}
+
+// Extract response body from a raw HTTP response.
+function http_body(string $response): string {
+    return phprs_http_response_body($response);
+}
+?>

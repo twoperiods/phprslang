@@ -1,0 +1,318 @@
+use std::collections::HashMap;
+use crate::parser::*;
+use crate::typeck::ty::Ty;
+
+#[derive(Debug, Clone)]
+pub struct TypeEnv {
+    vars: HashMap<String, Ty>,
+    funcs: HashMap<String, (Vec<Ty>, Ty)>,
+}
+
+impl TypeEnv {
+    pub fn new() -> Self {
+        let mut env = Self {
+            vars: HashMap::new(),
+            funcs: HashMap::new(),
+        };
+        // Register builtins
+        env.funcs.insert("strlen".into(), (vec![Ty::String], Ty::Int));
+        env.funcs.insert("count".into(), (vec![Ty::Array(Box::new(Ty::Unknown))], Ty::Int));
+        env.funcs.insert("trim".into(), (vec![Ty::String], Ty::String));
+        env.funcs.insert("str_contains".into(), (vec![Ty::String, Ty::String], Ty::Bool));
+        env
+    }
+
+    pub fn define(&mut self, name: &str, ty: Ty) {
+        self.vars.insert(name.to_string(), ty);
+    }
+
+    pub fn get(&self, name: &str) -> Option<&Ty> {
+        self.vars.get(name)
+    }
+
+    pub fn get_func(&self, name: &str) -> Option<&(Vec<Ty>, Ty)> {
+        self.funcs.get(name)
+    }
+}
+
+pub struct TypeChecker {
+    env: TypeEnv,
+    errors: Vec<String>,
+}
+
+impl TypeChecker {
+    pub fn new() -> Self {
+        Self {
+            env: TypeEnv::new(),
+            errors: Vec::new(),
+        }
+    }
+
+    pub fn check(&mut self, program: &Program) -> Result<TypeEnv, Vec<String>> {
+        // First pass: collect all function signatures
+        for stmt in &program.stmts {
+            match stmt {
+                Stmt::Function { name, params, return_type, .. }
+                | Stmt::ExternFunction { name, params, return_type } => {
+                    let param_tys: Vec<Ty> = params.iter().map(|p| {
+                        p.ty.as_ref().map(|t| Ty::from_ast_type(t)).unwrap_or(Ty::Unknown)
+                    }).collect();
+                    let ret_ty = return_type.as_ref().map(|t| Ty::from_ast_type(t)).unwrap_or(Ty::Void);
+                    self.env.funcs.insert(name.clone(), (param_tys, ret_ty));
+                }
+                _ => {}
+            }
+        }
+
+        // Second pass: check all statements
+        for stmt in &program.stmts {
+            self.check_stmt(stmt);
+        }
+
+        if self.errors.is_empty() {
+            Ok(self.env.clone())
+        } else {
+            Err(self.errors.clone())
+        }
+    }
+
+    fn error(&mut self, msg: String) {
+        self.errors.push(msg);
+    }
+
+    pub fn check_and_get_env(&mut self, program: &Program) -> Result<TypeEnv, Vec<String>> {
+        self.check(program)
+    }
+
+    fn check_stmt(&mut self, stmt: &Stmt) {
+        match stmt {
+            Stmt::Let { name, ty, value, .. } => {
+                let inferred = match value {
+                    Some(expr) => self.infer_expr(expr),
+                    None => Ty::Null,
+                };
+                let declared = ty.as_ref().map(|t| Ty::from_ast_type(t));
+                let final_ty = match (&declared, &inferred) {
+                    (Some(d), Ty::Unknown) => d.clone(),
+                    (Some(d), i) => {
+                        if d != i && *d != Ty::Unknown && *i != Ty::Null {
+                            // Allow int->float promotion
+                            if !(*d == Ty::Float && *i == Ty::Int) {
+                                self.error(format!("Type mismatch: declared {}, inferred {}", d, i));
+                            }
+                        }
+                        d.clone()
+                    }
+                    (None, i) => i.clone(),
+                };
+                self.env.define(name, final_ty);
+            }
+            Stmt::Function { name, params, return_type, body } => {
+                let param_tys: Vec<Ty> = params.iter().map(|p| {
+                    p.ty.as_ref().map(|t| Ty::from_ast_type(t)).unwrap_or(Ty::Unknown)
+                }).collect();
+                let ret_ty = return_type.as_ref().map(|t| Ty::from_ast_type(t)).unwrap_or(Ty::Void);
+
+                // Add params to env for body checking
+                for (param, param_ty) in params.iter().zip(param_tys.iter()) {
+                    self.env.define(&param.name, param_ty.clone());
+                }
+                self.check_stmt(body);
+                // We don't validate return type strictly in MVP
+                let _ = (name, ret_ty);
+            }
+            Stmt::If { condition, then_branch, else_branch } => {
+                self.infer_expr(condition);
+                self.check_stmt(then_branch);
+                if let Some(b) = else_branch {
+                    self.check_stmt(b);
+                }
+            }
+            Stmt::For { init, condition, update, body } => {
+                self.check_stmt(init);
+                if let Some(c) = condition { self.infer_expr(c); }
+                if let Some(u) = update { self.infer_expr(u); }
+                self.check_stmt(body);
+            }
+            Stmt::While { condition, body } => {
+                self.infer_expr(condition);
+                self.check_stmt(body);
+            }
+            Stmt::DoWhile { body, condition } => {
+                self.check_stmt(body);
+                self.infer_expr(condition);
+            }
+            Stmt::Foreach { iterable, value_var, key_var, body } => {
+                let iter_ty = self.infer_expr(iterable);
+                match iter_ty {
+                    Ty::Array(elem_ty) => {
+                        if let Some(k) = key_var { self.env.define(k, Ty::Int); }
+                        self.env.define(value_var, (*elem_ty).clone());
+                    }
+                    Ty::Dict(k_ty, v_ty) => {
+                        if let Some(k) = key_var { self.env.define(k, (*k_ty).clone()); }
+                        self.env.define(value_var, (*v_ty).clone());
+                    }
+                    Ty::String => {
+                        if let Some(k) = key_var { self.env.define(k, Ty::Int); }
+                        self.env.define(value_var, Ty::String);
+                    }
+                    Ty::Any | Ty::Unknown => {
+                        if let Some(k) = key_var { self.env.define(k, Ty::Any); }
+                        self.env.define(value_var, Ty::Any);
+                    }
+                    _ => {}
+                }
+                self.check_stmt(body);
+            }
+            Stmt::Return(expr) => {
+                if let Some(e) = expr { self.infer_expr(e); }
+            }
+            Stmt::Break | Stmt::Continue => {}
+            Stmt::Throw(expr) => { self.infer_expr(expr); }
+            Stmt::TryCatch { try_body, catch_var, catch_body } => {
+                self.check_stmt(try_body);
+                self.env.define(catch_var, Ty::String);
+                self.check_stmt(catch_body);
+            }
+            Stmt::Echo(expr) => { self.infer_expr(expr); }
+            Stmt::ExprStmt(expr) => { self.infer_expr(expr); }
+            Stmt::Block(stmts) => {
+                for s in stmts { self.check_stmt(s); }
+            }
+            Stmt::Match { expr, arms } => {
+                let _match_ty = self.infer_expr(expr);
+                for arm in arms {
+                    let _arm_ty = self.infer_expr(&arm.body);
+                }
+            }
+            _ => {} // StructDef, EnumDef ignored for now
+        }
+    }
+
+    fn infer_expr(&mut self, expr: &Expr) -> Ty {
+        match expr {
+            Expr::Literal(lit) => match lit {
+                Literal::Int(_) => Ty::Int,
+                Literal::Float(_) => Ty::Float,
+                Literal::String_(_) => Ty::String,
+                Literal::Bool(_) => Ty::Bool,
+                Literal::Null => Ty::Null,
+            },
+            Expr::Variable(name) => {
+                if let Some(ty) = self.env.get(name) {
+                    ty.clone()
+                } else if self.env.get_func(name).is_some() {
+                    // Function reference - return function type
+                    Ty::Unknown
+                } else {
+                    self.error(format!("Undefined variable: ${}", name));
+                    Ty::Unknown
+                }
+            }
+            Expr::Binary { left, op, right } => {
+                let lt = self.infer_expr(left);
+                let rt = self.infer_expr(right);
+                match op {
+                    BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
+                        if lt.is_numeric() && rt.is_numeric() {
+                            match (&lt, &rt) {
+                                (Ty::Float, _) | (_, Ty::Float) => Ty::Float,
+                                _ => Ty::Int,
+                            }
+                        } else if matches!(op, BinaryOp::Add) && (lt == Ty::String || rt == Ty::String) {
+                            Ty::String
+                        } else {
+                            self.error(format!("Cannot apply {:?} to {} and {}", op, lt, rt));
+                            Ty::Unknown
+                        }
+                    }
+                    BinaryOp::Concat => Ty::String,
+                    BinaryOp::Eq | BinaryOp::Neq | BinaryOp::StrictEq | BinaryOp::StrictNeq | BinaryOp::Lt | BinaryOp::Gt | BinaryOp::Le | BinaryOp::Ge => {
+                        Ty::Bool
+                    }
+                    BinaryOp::And | BinaryOp::Or => Ty::Bool,
+                }
+            }
+            Expr::Unary { op, right } => {
+                let rt = self.infer_expr(right);
+                match op {
+                    UnaryOp::Neg => if rt.is_numeric() { rt } else { Ty::Unknown },
+                    UnaryOp::Not => Ty::Bool,
+                }
+            }
+            Expr::Call { callee, args } => {
+                let _ = args.iter().map(|a| self.infer_expr(a)).collect::<Vec<_>>();
+                // Look up function return type
+                if let Expr::Variable(name) = callee.as_ref() {
+                    if let Some((_, ret_ty)) = self.env.get_func(name) {
+                        return ret_ty.clone();
+                    }
+                }
+                Ty::Unknown
+            }
+            Expr::Index { target, index } => {
+                let tt = self.infer_expr(target);
+                let _ = self.infer_expr(index);
+                match tt {
+                    Ty::Array(elem) => (*elem).clone(),
+                    Ty::Dict(_, v) => (*v).clone(),
+                    Ty::String => Ty::String,
+                    Ty::Any => Ty::Any,
+                    Ty::Unknown => Ty::Unknown,
+                    _ => {
+                        self.error(format!("Cannot index type {}", tt));
+                        Ty::Unknown
+                    }
+                }
+            }
+            Expr::FieldAccess { target, field } => {
+                let _ = self.infer_expr(target);
+                let _ = field;
+                Ty::Unknown
+            }
+            Expr::Array(items) => {
+                if items.is_empty() {
+                    Ty::Array(Box::new(Ty::Unknown))
+                } else {
+                    let elem = self.infer_expr(&items[0]);
+                    Ty::Array(Box::new(elem))
+                }
+            }
+            Expr::Dict(pairs) => {
+                if pairs.is_empty() {
+                    Ty::Dict(Box::new(Ty::Unknown), Box::new(Ty::Unknown))
+                } else {
+                    let k = self.infer_expr(&pairs[0].0);
+                    let v = self.infer_expr(&pairs[0].1);
+                    Ty::Dict(Box::new(k), Box::new(v))
+                }
+            }
+            Expr::Assign { target, value, .. } => {
+                let val_ty = self.infer_expr(value);
+                // Try to update the target variable's type
+                if let Expr::Variable(name) = target.as_ref() {
+                    if let Some(existing) = self.env.get(name) {
+                        // Allow reassignment with compatible type
+                        if *existing != val_ty && *existing != Ty::Unknown {
+                            // Just use existing type
+                        }
+                    }
+                }
+                val_ty
+            }
+            Expr::Range { .. } => Ty::Array(Box::new(Ty::Int)),
+            Expr::Closure { .. } => Ty::Unknown,
+            Expr::MatchExpr { arms, .. } => {
+                if arms.is_empty() {
+                    Ty::Unknown
+                } else {
+                    self.infer_expr(&arms[0].body)
+                }
+            }
+            Expr::IncDec { target, is_inc: _, is_prefix: _ } => {
+                self.infer_expr(target)
+            }
+        }
+    }
+}

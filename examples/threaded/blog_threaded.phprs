@@ -1,0 +1,173 @@
+<?phprs
+// PHPRS Threaded Blog Application
+// Demonstrates high-concurrency server with thread-per-connection model.
+// Build: phprs build examples/threaded/blog_threaded.phprs -o blog_threaded.exe
+// Run:   ./blog_threaded.exe
+// Test:  curl http://localhost:8080/ && curl http://localhost:8080/about && curl http://localhost:8080/api/info
+
+include "../../framework/runtime.phprs";
+
+// ---- Response Helpers ----
+function response_html(int $status, string $html): string {
+    return phprs_http_response($status, "text/html; charset=utf-8", $html);
+}
+
+function response_json(int $status, string $json): string {
+    return phprs_http_response($status, "application/json", $json);
+}
+
+function response_404(): string {
+    let $body = "<h1>404 Not Found</h1>";
+    return phprs_http_response(404, "text/html; charset=utf-8", $body);
+}
+
+// ---- Template renderer ----
+function render(string $tmpl, string $k1, string $v1): string {
+    let $ph = "{{" . $k1 . "}}";
+    return phprs_str_replace($tmpl, $ph, $v1);
+}
+
+function render2(string $tmpl, string $k1, string $v1, string $k2, string $v2): string {
+    let $tmp = render($tmpl, $k1, $v1);
+    return render($tmp, $k2, $v2);
+}
+
+// ---- App Dispatch ----
+function app_dispatch(string $path): string {
+    return match ($path) {
+        "/" => home_page(),
+        "/about" => about_page(),
+        "/api/info" => api_info(),
+        "/api/echo" => api_echo(),
+        _ => response_404(),
+    };
+}
+
+// ---- Thread Handler (entry point for each worker thread) ----
+// Signature must be (string $raw): string for the dispatch table.
+function handle_request(string $raw): string {
+    let $path = phprs_http_path($raw);
+    return app_dispatch($path);
+}
+
+// ---- Controllers ----
+function home_page(): string {
+    let $title = "PHPRS MVC (Threaded)";
+    let $message = "This page was served by a worker thread! The server handles multiple connections concurrently.";
+
+    let $html = "<!DOCTYPE html>
+<html>
+<head>
+    <title>{{title}}</title>
+    <style>
+        body { font-family: sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; background: #fafafa; }
+        h1 { color: #4F46E5; }
+        .card { background: white; padding: 1.5rem; border-radius: 8px; margin: 1rem 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .badge { display: inline-block; background: #22c55e; color: white; padding: 0.25em 0.75em; border-radius: 9999px; font-size: 0.85em; }
+        code { background: #e8e8f0; padding: 0.2em 0.4em; border-radius: 4px; font-size: 0.9em; }
+        nav a { margin: 0 0.5rem; color: #4F46E5; text-decoration: none; }
+        hr { border: none; border-top: 1px solid #e0e0e0; margin: 2rem 0; }
+    </style>
+</head>
+<body>
+    <h1>{{title}} <span class=\"badge\">Threaded</span></h1>
+    <div class=\"card\">
+        <p>{{message}}</p>
+        <p>Try these endpoints:</p>
+        <ul>
+            <li><a href=\"/\">Home</a> — This page</li>
+            <li><a href=\"/about\">About</a> — Framework info</li>
+            <li><a href=\"/api/info\">API Info</a> — JSON response</li>
+            <li><a href=\"/api/echo\">API Echo</a> — Request echo</li>
+        </ul>
+    </div>
+    <nav>
+        <a href=\"/\">Home</a>
+        <a href=\"/about\">About</a>
+        <a href=\"/api/info\">API</a>
+    </nav>
+    <hr/>
+    <p><small>Powered by PHPRS — Thread-per-connection concurrency model</small></p>
+</body>
+</html>";
+
+    return response_html(200, render2($html, "title", $title, "message", $message));
+}
+
+function about_page(): string {
+    let $html = "<!DOCTYPE html>
+<html>
+<head>
+    <title>About PHPRS MVC (Threaded)</title>
+    <style>
+        body { font-family: sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; background: #fafafa; }
+        h1 { color: #4F46E5; }
+        .card { background: white; padding: 1.5rem; border-radius: 8px; margin: 1rem 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    </style>
+</head>
+<body>
+    <h1>Concurrency Model</h1>
+    <div class=\"card\">
+        <h2>Thread-per-Connection</h2>
+        <p>Each incoming request spawns a new worker thread. The main thread immediately returns to accepting new connections, enabling true concurrent request handling.</p>
+        <p><strong>Windows:</strong> Uses <code>CreateThread</code> with <code>_beginthreadex</code></p>
+        <p><strong>Linux:</strong> Uses <code>pthread_create</code> with <code>pthread_detach</code></p>
+    </div>
+    <div class=\"card\">
+        <h2>Request Flow</h2>
+        <ol>
+            <li>Main thread: <code>accept()</code> → <code>read()</code> → <code>phprs_thread_spawn()</code></li>
+            <li>Worker thread: <code>handle_request()</code> → <code>write()</code> → <code>close()</code></li>
+            <li>Main thread: immediately back to <code>accept()</code></li>
+        </ol>
+    </div>
+    <nav>
+        <a href=\"/\">Home</a>
+        <a href=\"/about\">About</a>
+        <a href=\"/api/info\">API</a>
+    </nav>
+</body>
+</html>";
+    return response_html(200, $html);
+}
+
+function api_info(): string {
+    let $json = "{\"framework\":\"PHPRS MVC\", \"model\":\"thread-per-connection\", \"concurrency\":\"true\", \"server\":\"embedded C runtime\"}";
+    return response_json(200, $json);
+}
+
+function api_echo(): string {
+    let $json = "{\"message\":\"Hello from threaded API!\", \"thread_safe\":true}";
+    return response_json(200, $json);
+}
+
+// ---- Threaded Main Server Loop ----
+let $server = phprs_server_new(8080);
+
+if ($server < 0) {
+    echo "Failed to start server on port 8080\n";
+    return;
+}
+
+echo "=== PHPRS MVC Framework (Threaded) ===\n";
+echo "Server started on http://localhost:8080\n";
+echo "Model: thread-per-connection\n";
+echo "Press Ctrl+C to stop.\n";
+
+for (let mut $running = 1; $running == 1; ) {
+    let $client = phprs_server_accept($server);
+
+    if ($client >= 0) {
+        let $raw = phprs_socket_read($client, 65536);
+        let $spawned = phprs_thread_spawn("handle_request", $client, $raw);
+        if ($spawned == 0) {
+            // Fallback: handle inline if thread spawn fails
+            let $response = phprs_http_response(500, "text/plain", "Server busy");
+            phprs_socket_write($client, $response);
+            phprs_socket_close($client);
+        }
+    }
+}
+
+phprs_socket_close($server);
+?>

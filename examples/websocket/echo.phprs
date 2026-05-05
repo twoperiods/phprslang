@@ -1,0 +1,171 @@
+<?phprs
+// PHPRS WebSocket Echo Server
+// Build: phprs build examples/websocket/echo.phprs -o echo_ws.exe
+// Run:   ./echo_ws.exe
+// Test:  Open http://localhost:8080 in browser, or use wscat -c ws://localhost:8080
+
+include "../../framework/runtime.phprs";
+
+// ---- HTTP Response Helper ----
+function http_response(int $status, string $body): string {
+    return phprs_http_response($status, "text/html; charset=utf-8", $body);
+}
+
+// ---- Main Server ----
+let $server = phprs_server_new(8080);
+
+if ($server < 0) {
+    echo "Failed to start server on port 8080\n";
+    return;
+}
+
+echo "=== PHPRS WebSocket Echo Server ===\n";
+echo "WebSocket: ws://localhost:8080\n";
+echo "HTTP:      http://localhost:8080\n";
+echo "Press Ctrl+C to stop.\n";
+
+for (let mut $running = 1; $running == 1; ) {
+    let $client = phprs_server_accept($server);
+
+    if ($client >= 0) {
+        let $raw = phprs_socket_read($client, 65536);
+
+        // Check if this is a WebSocket upgrade
+        if (phprs_is_websocket_upgrade($raw) == 1) {
+            // ---- WebSocket Connection ----
+            let $handshake = phprs_ws_handshake_response($raw);
+            phprs_socket_write($client, $handshake);
+            echo "WebSocket client connected\n";
+
+            // Per-connection message loop
+            let mut $ws_alive = 1;
+            for (let mut $ws_alive = 1; $ws_alive == 1; ) {
+                let $frame_raw = phprs_ws_read_frame($client, 0);
+                let $opcode_str = phprs_str_split($frame_raw, ":", 0);
+                let $payload = phprs_str_split($frame_raw, ":", 1);
+
+                if ($opcode_str == "1") {
+                    // Text frame -- echo back
+                    phprs_ws_write_frame($client, $payload, 1);
+                    echo "Echo: " . $payload . "\n";
+                } else {
+                    if ($opcode_str == "8") {
+                        // Close frame
+                        echo "Client disconnected\n";
+                        $ws_alive = 0;
+                    } else {
+                        if ($opcode_str == "9") {
+                            // Ping -- respond with pong
+                            phprs_ws_send_pong($client, $payload);
+                        } else {
+                            // Error or disconnection
+                            if ($opcode_str == "-1") {
+                                echo "Client connection lost\n";
+                            }
+                            $ws_alive = 0;
+                        }
+                    }
+                }
+            }
+
+            phprs_ws_close($client);
+        } else {
+            // ---- HTTP Fallback (serve test page) ----
+            let $html = "<!DOCTYPE html>
+<html>
+<head>
+    <title>PHPRS WebSocket Echo Server</title>
+    <meta charset=\"utf-8\">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; max-width: 700px; margin: 2rem auto; padding: 0 1rem; background: #f0f2f5; }
+        h1 { color: #4F46E5; margin-bottom: 0.5rem; }
+        .status { display: flex; align-items: center; gap: 0.5rem; margin: 1rem 0; }
+        .dot { width: 12px; height: 12px; border-radius: 50%; background: #d1d5db; }
+        .dot.on { background: #22c55e; }
+        #log { background: #1a1a2e; color: #e0e0e0; padding: 1rem; border-radius: 8px; min-height: 200px; max-height: 400px; overflow-y: auto; font-family: \"Cascadia Code\", monospace; font-size: 0.875rem; white-space: pre-wrap; word-break: break-all; }
+        .input-row { display: flex; gap: 0.5rem; margin: 1rem 0; }
+        #msg { flex: 1; padding: 0.6rem; font-size: 1rem; border: 2px solid #d1d5db; border-radius: 6px; outline: none; }
+        #msg:focus { border-color: #4F46E5; }
+        button { padding: 0.6rem 1.25rem; font-size: 1rem; background: #4F46E5; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; }
+        button:hover { background: #4338CA; }
+        button:disabled { background: #9ca3af; cursor: not-allowed; }
+        .info { color: #6b7280; font-size: 0.85rem; margin-top: 1rem; }
+        code { background: #e5e7eb; padding: 0.15em 0.4em; border-radius: 3px; font-size: 0.9em; }
+    </style>
+</head>
+<body>
+    <h1>PHPRS WebSocket Echo Server</h1>
+    <div class=\"status\">
+        <div class=\"dot\" id=\"dot\"></div>
+        <span id=\"status-text\">Connecting...</span>
+    </div>
+    <div id=\"log\"></div>
+    <div class=\"input-row\">
+        <input id=\"msg\" type=\"text\" placeholder=\"Type a message and press Enter...\" autofocus />
+        <button id=\"send-btn\" onclick=\"send()\" disabled>Send</button>
+    </div>
+    <p class=\"info\">Connected to <code>ws://localhost:8080</code> &middot; Messages are echoed back by the server.</p>
+
+    <script>
+        var dot = document.getElementById('dot');
+        var statusText = document.getElementById('status-text');
+        var log = document.getElementById('log');
+        var input = document.getElementById('msg');
+        var btn = document.getElementById('send-btn');
+        var ws;
+
+        function logMsg(prefix, msg) {
+            log.textContent += '[' + new Date().toLocaleTimeString() + '] ' + prefix + ': ' + msg + '\n';
+            log.scrollTop = log.scrollHeight;
+        }
+
+        function connect() {
+            ws = new WebSocket('ws://' + location.host);
+            ws.onopen = function() {
+                dot.classList.add('on');
+                statusText.textContent = 'Connected';
+                btn.disabled = false;
+                logMsg('SYSTEM', 'Connected to server');
+            };
+            ws.onmessage = function(e) {
+                logMsg('SERVER', e.data);
+            };
+            ws.onclose = function() {
+                dot.classList.remove('on');
+                statusText.textContent = 'Disconnected (reconnecting in 2s...)';
+                btn.disabled = true;
+                logMsg('SYSTEM', 'Disconnected');
+                setTimeout(connect, 2000);
+            };
+            ws.onerror = function() {
+                logMsg('SYSTEM', 'Connection error');
+            };
+        }
+
+        function send() {
+            var msg = input.value.trim();
+            if (msg && ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(msg);
+                logMsg('YOU', msg);
+                input.value = '';
+            }
+        }
+
+        input.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') send();
+        });
+
+        connect();
+    </script>
+</body>
+</html>";
+            let $response = http_response(200, $html);
+            phprs_socket_write($client, $response);
+            phprs_socket_close($client);
+        }
+    }
+}
+
+phprs_socket_close($server);
+?>

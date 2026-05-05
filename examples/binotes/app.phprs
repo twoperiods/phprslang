@@ -1,0 +1,191 @@
+<?phprs
+// binotes — Simple Note-Taking MVC Application
+//
+// Build:  phprs build examples/binotes/app.phprs -o binotes.exe
+// Run:    ./binotes.exe
+// Dev:    phprs run examples/binotes/app.phprs
+//
+// Then open: http://localhost:9090
+//
+// Directory structure:
+//   examples/binotes/
+//   ├── app.phprs                    ← entry point (this file)
+//   ├── controllers/
+//   │   └── note_controller.phprs    ← CRUD handlers
+//   └── data/
+//       └── notes.json               ← storage (auto-created)
+
+include "../../framework/runtime.phprs";
+include "controllers/note_controller.phprs";
+
+// ---- Response Helpers ----
+
+function response_404(): string {
+    let $html = "<!DOCTYPE html>
+<html>
+<head><meta charset=\"utf-8\"><title>404 — binotes</title>
+<style>body{font-family:sans-serif;max-width:600px;margin:3rem auto;text-align:center;}</style>
+</head>
+<body><h1>404</h1><p>Page not found.</p><p><a href=\"/\">Home</a></p></body></html>";
+    return phprs_http_response(404, "text/html; charset=utf-8", $html);
+}
+
+// ---- Router ----
+
+function router_seg_count(string $path): int {
+    let $work = $path;
+    if (phprs_str_starts_with($work, "/")) {
+        $work = phprs_str_replace($work, "/", "");
+    }
+    if ($work == "") {
+        return 0;
+    }
+    let mut $i = 0;
+    for (let mut $i = 0; $i < 20; $i = $i + 1) {
+        let $seg = phprs_str_split($work, "/", $i);
+        if ($seg == "") {
+            return $i;
+        }
+    }
+    return 0;
+}
+
+function router_seg(string $path, int $idx): string {
+    let $work = $path;
+    if (phprs_str_starts_with($work, "/")) {
+        $work = phprs_str_replace($work, "/", "");
+    }
+    return phprs_str_split($work, "/", $idx);
+}
+
+// Check if path segments match pattern segments
+function router_match(string $method, string $path, string $route_method, string $pattern): int {
+    if ($method != $route_method) {
+        return 0;
+    }
+    let $pc = router_seg_count($path);
+    let $rc = router_seg_count($pattern);
+    if ($pc != $rc) {
+        return 0;
+    }
+    let mut $i = 0;
+    for (let mut $i = 0; $i < $pc; $i = $i + 1) {
+        let $ps = router_seg($path, $i);
+        let $rs = router_seg($pattern, $i);
+        if (phprs_str_starts_with($rs, "{")) {
+            // parameter — matches anything
+            let $_x = 1;
+        } else {
+            if ($ps != $rs) {
+                return 0;
+            }
+        }
+    }
+    return 1;
+}
+
+// Extract a named parameter value from a matched path
+function router_param(string $path, string $pattern, string $name): int {
+    let $pc = router_seg_count($path);
+    let mut $i = 0;
+    for (let mut $i = 0; $i < $pc; $i = $i + 1) {
+        let $rs = router_seg($pattern, $i);
+        if (phprs_str_starts_with($rs, "{")) {
+            let $pn = phprs_str_replace($rs, "{", "");
+            $pn = phprs_str_replace($pn, "}", "");
+            if ($pn == $name) {
+                let $val = router_seg($path, $i);
+                return str_to_int($val);
+            }
+        }
+    }
+    return 0;
+}
+
+// ---- App Dispatch ----
+
+function app_dispatch(string $method, string $path, string $raw): string {
+    // GET /
+    if (router_match($method, $path, "GET", "/")) {
+        return note_index();
+    }
+
+    // GET /notes/create
+    if (router_match($method, $path, "GET", "/notes/create")) {
+        return note_create_form();
+    }
+
+    // POST /notes
+    if (router_match($method, $path, "POST", "/notes")) {
+        return note_store($raw);
+    }
+
+    // GET /notes/{id}
+    if (router_match($method, $path, "GET", "/notes/{id}")) {
+        let $id = router_param($path, "/notes/{id}", "id");
+        return note_show($id);
+    }
+
+    // GET /notes/{id}/edit
+    if (router_match($method, $path, "GET", "/notes/{id}/edit")) {
+        let $id = router_param($path, "/notes/{id}/edit", "id");
+        return note_edit_form($id);
+    }
+
+    // POST /notes/{id}/update
+    if (router_match($method, $path, "POST", "/notes/{id}/update")) {
+        let $id = router_param($path, "/notes/{id}/update", "id");
+        return note_update($id, $raw);
+    }
+
+    // POST /notes/{id}/delete
+    if (router_match($method, $path, "POST", "/notes/{id}/delete")) {
+        let $id = router_param($path, "/notes/{id}/delete", "id");
+        return note_delete($id);
+    }
+
+    return response_404();
+}
+
+// String-to-int via JSON parse (avoids string+int coercion which PHPRS doesn't support)
+function str_to_int(string $s): int {
+    return json_decode($s);
+}
+
+// ---- Main Server Loop ----
+
+function main(): void {
+    let $server = phprs_server_new(9090);
+
+    if ($server < 0) {
+        echo "ERROR: Failed to start server on port 9090\n";
+        echo "Make sure the port is not already in use.\n";
+        return;
+    }
+
+    echo "============================================\n";
+    echo "  binotes — Note-Taking App\n";
+    echo "  Server: http://localhost:9090\n";
+    echo "  Press Ctrl+C to stop.\n";
+    echo "============================================\n";
+
+    for (let mut $running = 1; $running == 1; ) {
+        let $client = phprs_server_accept($server);
+
+        if ($client >= 0) {
+            let $raw = phprs_socket_read($client, 65536);
+            let $method = phprs_http_method($raw);
+            let $path_raw = phprs_http_path($raw);
+            let $path = phprs_url_decode($path_raw);
+
+            let $response = app_dispatch($method, $path, $raw);
+            phprs_socket_write($client, $response);
+            phprs_socket_close($client);
+        }
+    }
+
+    phprs_socket_close($server);
+}
+
+main();
+?>

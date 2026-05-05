@@ -1,0 +1,8 @@
+/target
+/tests
+/.claude
+*.exe
+*.obj
+*.o
+*.ilk
+*.pdb

@@ -1,0 +1,35 @@
+<?phprs
+// CORS Middleware — cross-origin resource sharing headers
+// Usage:
+//   include "framework/middleware/cors.phprs";
+//   cors_config("*", "GET,POST,PUT,DELETE", "Content-Type,Authorization");
+//   let $cors_hdrs = cors_headers();              // get CORS response headers
+//   if (cors_is_preflight($raw)) { ... }          // handle OPTIONS preflight
+
+extern function phprs_cors_set_config(string $origin, string $methods, string $headers): void;
+extern function phprs_cors_get_origin(): string;
+extern function phprs_cors_get_methods(): string;
+extern function phprs_cors_get_headers(): string;
+extern function phprs_cors_is_preflight(string $raw): int;
+
+function cors_config(string $origin, string $methods, string $headers): void {
+    phprs_cors_set_config($origin, $methods, $headers);
+}
+
+function cors_headers(): string {
+    let $origin = phprs_cors_get_origin();
+    if ($origin == "") { return ""; }
+    return "Access-Control-Allow-Origin: " . $origin . "\r\n"
+         . "Access-Control-Allow-Methods: " . phprs_cors_get_methods() . "\r\n"
+         . "Access-Control-Allow-Headers: " . phprs_cors_get_headers() . "\r\n";
+}
+
+function cors_is_preflight(string $raw): int {
+    return phprs_cors_is_preflight($raw);
+}
+
+function cors_preflight_response(): string {
+    let $hdrs = "Content-Length: 0\r\nContent-Type: text/plain\r\n" . cors_headers();
+    return "HTTP/1.1 204 No Content\r\n" . $hdrs . "\r\n";
+}
+?>

@@ -1,0 +1,395 @@
+<?phprs
+// Simple Router — one-string route definitions, zero boilerplate.
+// Requires: include "framework/runtime.phprs"
+//
+// Route definition format:
+//   "METHOD /path?query={type} => handler"
+//   Multiple routes separated by "|"
+//
+// Example:
+//   let $RT = "GET / => home|GET /users/{id} => user_detail|POST /login => login";
+//   let $m = route_match("GET", "/users/42", $RT);
+//   // $m → "user_detail&id=42"
+//
+//   let $h = route_handler($m);  // "user_detail"
+//   let $p = route_params($m);   // "id=42"
+//   let $id = route_param($p, "id");  // "42"
+
+// ---- Type validators (for {int}, {float} constraints) ----
+
+// Check if s is a valid integer string
+function router_simple_is_int(string $s): int {
+    if ($s == "") { return 0; }
+    let $work = $s;
+    if (phprs_str_starts_with($work, "-") == 1) {
+        $work = phprs_str_replace($work, "-", "");
+    }
+    if ($work == "") { return 0; }
+    $work = phprs_str_replace($work, "0", "");
+    $work = phprs_str_replace($work, "1", "");
+    $work = phprs_str_replace($work, "2", "");
+    $work = phprs_str_replace($work, "3", "");
+    $work = phprs_str_replace($work, "4", "");
+    $work = phprs_str_replace($work, "5", "");
+    $work = phprs_str_replace($work, "6", "");
+    $work = phprs_str_replace($work, "7", "");
+    $work = phprs_str_replace($work, "8", "");
+    $work = phprs_str_replace($work, "9", "");
+    if ($work == "") { return 1; }
+    return 0;
+}
+
+// Check if s is a valid float string
+function router_simple_is_float(string $s): int {
+    if ($s == "") { return 0; }
+    let $work = $s;
+    if (phprs_str_starts_with($work, "-") == 1) {
+        $work = phprs_str_replace($work, "-", "");
+    }
+    if ($work == "") { return 0; }
+    if (phprs_str_contains($work, ".") == 1) {
+        $work = phprs_str_replace($work, ".", "");
+    }
+    $work = phprs_str_replace($work, "0", "");
+    $work = phprs_str_replace($work, "1", "");
+    $work = phprs_str_replace($work, "2", "");
+    $work = phprs_str_replace($work, "3", "");
+    $work = phprs_str_replace($work, "4", "");
+    $work = phprs_str_replace($work, "5", "");
+    $work = phprs_str_replace($work, "6", "");
+    $work = phprs_str_replace($work, "7", "");
+    $work = phprs_str_replace($work, "8", "");
+    $work = phprs_str_replace($work, "9", "");
+    if ($work == "") { return 1; }
+    return 0;
+}
+
+// ---- Route definition parsing ----
+
+// Count route entries separated by "|"
+function route_entry_count(string $routes): int {
+    if ($routes == "") { return 0; }
+    let mut $i = 0;
+    for (let mut $i = 0; $i < 100; $i = $i + 1) {
+        let $seg = phprs_str_split($routes, "|", $i);
+        if ($seg == "") { return $i; }
+    }
+    return 0;
+}
+
+// Get the nth route entry
+function route_entry_get(string $routes, int $index): string {
+    return phprs_str_split($routes, "|", $index);
+}
+
+// ---- URL helpers ----
+
+// Split URL by "?" into path and query parts
+// Returns "path=PATH&query=QUERY"
+function route_url_split(string $url): string {
+    if (phprs_str_contains($url, "?") == 0) {
+        return "path=" . $url . "&query=";
+    }
+    let $path = phprs_str_split($url, "?", 0);
+    let $query = phprs_str_split($url, "?", 1);
+    return "path=" . $path . "&query=" . $query;
+}
+
+function route_url_path(string $parsed): string {
+    return phprs_str_replace(phprs_str_split($parsed, "&", 0), "path=", "");
+}
+
+function route_url_query(string $parsed): string {
+    if (phprs_str_contains($parsed, "&query=") == 0) { return ""; }
+    return phprs_str_split($parsed, "&query=", 1);
+}
+
+// ---- Path segment matching ----
+
+// Count segments in a path
+function route_seg_count(string $path): int {
+    let $work = $path;
+    if (phprs_str_starts_with($work, "/") == 1) {
+        $work = phprs_str_replace($work, "/", "");
+    }
+    if ($work == "") { return 0; }
+    let mut $i = 0;
+    for (let mut $i = 0; $i < 30; $i = $i + 1) {
+        let $seg = phprs_str_split($work, "/", $i);
+        if ($seg == "") { return $i; }
+    }
+    return 0;
+}
+
+// Get nth segment of a path
+function route_seg(string $path, int $index): string {
+    let $work = $path;
+    if (phprs_str_starts_with($work, "/") == 1) {
+        $work = phprs_str_replace($work, "/", "");
+    }
+    return phprs_str_split($work, "/", $index);
+}
+
+// Check if a path matches a path pattern (with {param} wildcards)
+function route_path_match(string $path, string $pattern): int {
+    let $pc = route_seg_count($path);
+    let $gc = route_seg_count($pattern);
+    if ($pc != $gc) { return 0; }
+    let mut $i = 0;
+    for (let mut $i = 0; $i < $pc; $i = $i + 1) {
+        let $ps = route_seg($path, $i);
+        let $gs = route_seg($pattern, $i);
+        if (phprs_str_starts_with($gs, "{") == 1) {
+            // Wildcard — matches anything
+            let $_skip = 1;
+        } else {
+            if ($ps != $gs) { return 0; }
+        }
+    }
+    return 1;
+}
+
+// Extract path params (e.g. /users/{id} + /users/42 → "id=42")
+function route_path_params(string $path, string $pattern): string {
+    let $pc = route_seg_count($path);
+    let mut $result = "";
+    let mut $i = 0;
+    for (let mut $i = 0; $i < $pc; $i = $i + 1) {
+        let $ps = route_seg($path, $i);
+        let $gs = route_seg($pattern, $i);
+        if (phprs_str_starts_with($gs, "{") == 1) {
+            let $name = phprs_str_replace($gs, "{", "");
+            $name = phprs_str_replace($name, "}", "");
+            if ($result != "") { $result = $result . "&"; }
+            $result = $result . $name . "=" . $ps;
+        }
+    }
+    return $result;
+}
+
+// ---- Query param matching ----
+
+// Get a query param value from query string
+function route_query_get(string $query_string, string $key): string {
+    if ($query_string == "") { return ""; }
+    let $search = $key . "=";
+    let mut $i = 0;
+    for (let mut $i = 0; $i < 100; $i = $i + 1) {
+        let $seg = phprs_str_split($query_string, "&", $i);
+        if ($seg == "") { $i = 200; }
+        else {
+            if (phprs_str_starts_with($seg, $search)) {
+                return phprs_url_decode(phprs_str_replace($seg, $search, ""));
+            }
+        }
+    }
+    return "";
+}
+
+// Parse query pattern "key1={type1}&key2={type2}" → "names=key1,key2&types=type1,type2"
+function route_query_pattern_parse(string $qp): string {
+    if ($qp == "") { return "names=&types="; }
+    let mut $names = "";
+    let mut $types = "";
+    let mut $i = 0;
+    for (let mut $i = 0; $i < 30; $i = $i + 1) {
+        let $seg = phprs_str_split($qp, "&", $i);
+        if ($seg == "") { $i = 200; }
+        else {
+            let $name = phprs_str_split($seg, "=", 0);
+            let $type_part = phprs_str_split($seg, "=", 1);
+            let $t = phprs_str_replace($type_part, "{", "");
+            $t = phprs_str_replace($t, "}", "");
+            if ($names != "") {
+                $names = $names . ",";
+                $types = $types . ",";
+            }
+            $names = $names . $name;
+            $types = $types . $t;
+        }
+    }
+    return "names=" . $names . "&types=" . $types;
+}
+
+function route_csv_get(string $csv, int $idx): string {
+    return phprs_str_split($csv, ",", $idx);
+}
+
+function route_csv_count(string $csv): int {
+    if ($csv == "") { return 0; }
+    let mut $i = 0;
+    for (let mut $i = 0; $i < 100; $i = $i + 1) {
+        if (phprs_str_split($csv, ",", $i) == "") { return $i; }
+    }
+    return 0;
+}
+
+// Check if a value passes a type constraint
+function route_type_check(string $val, string $type): int {
+    if ($type == "int") {
+        return router_simple_is_int($val);
+    }
+    if ($type == "float") {
+        return router_simple_is_float($val);
+    }
+    if ($type == "string") {
+        if ($val == "") { return 0; }
+        return 1;
+    }
+    // "any" or unknown — always pass
+    return 1;
+}
+
+// ---- Main: match one route entry ----
+
+// Match a single route entry against method+url.
+// Returns "" if no match, or "handler_name" or "handler_name&key=val&..." if matched.
+function route_match_one(string $method, string $url, string $entry): string {
+    // 1. Split entry "METHOD /path?query => handler"
+    if (phprs_str_contains($entry, " => ") == 0) { return ""; }
+    let $pattern_part = phprs_str_split($entry, " => ", 0);
+    let $handler = phprs_str_split($entry, " => ", 1);
+    if ($handler == "") { return ""; }
+
+    // 2. Extract METHOD from pattern
+    if (phprs_str_contains($pattern_part, " ") == 0) { return ""; }
+    let $pat_method = phprs_str_split($pattern_part, " ", 0);
+    let $pat_url = phprs_str_split($pattern_part, " ", 1);
+
+    // 3. Method must match
+    if ($pat_method != $method) { return ""; }
+
+    // 4. Split pattern URL into path + query pattern
+    let $pat_parsed = route_url_split($pat_url);
+    let $pat_path = route_url_path($pat_parsed);
+    let $pat_query = route_url_query($pat_parsed);
+
+    // 5. Split actual URL
+    let $url_parsed = route_url_split($url);
+    let $url_path = route_url_path($url_parsed);
+    let $url_query = route_url_query($url_parsed);
+
+    // 6. Path must match
+    if (route_path_match($url_path, $pat_path) == 0) { return ""; }
+
+    // 7. Extract path params
+    let $path_p = route_path_params($url_path, $pat_path);
+
+    // 8. Check query params if pattern has them
+    if ($pat_query != "") {
+        let $pqp = route_query_pattern_parse($pat_query);
+        let $pat_names_str = phprs_str_replace(phprs_str_split($pqp, "&", 0), "names=", "");
+        let $pat_types_str = phprs_str_replace(phprs_str_split($pqp, "&", 1), "types=", "");
+        let $pcnt = route_csv_count($pat_names_str);
+
+        // Collect query params, with type check
+        let mut $all_params = $path_p;
+        let mut $qi = 0;
+        for (let mut $qi = 0; $qi < $pcnt; $qi = $qi + 1) {
+            let $pname = route_csv_get($pat_names_str, $qi);
+            let $ptype = route_csv_get($pat_types_str, $qi);
+            let $pval = route_query_get($url_query, $pname);
+
+            // Type check
+            if (route_type_check($pval, $ptype) == 0) { return ""; }
+
+            if ($all_params != "") {
+                $all_params = $all_params . "&";
+            }
+            $all_params = $all_params . $pname . "=" . $pval;
+        }
+        // Append all raw URL query params (pass-through undeclared params)
+        if ($url_query != "") {
+            if ($all_params != "") {
+                $all_params = $all_params . "&";
+            }
+            $all_params = $all_params . $url_query;
+        }
+        if ($all_params != "") {
+            return $handler . "&" . $all_params;
+        }
+    }
+
+    // 9. Return handler with path params (if any)
+    if ($path_p != "") {
+        if ($url_query != "") {
+            return $handler . "&" . $path_p . "&" . $url_query;
+        }
+        return $handler . "&" . $path_p;
+    }
+    if ($url_query != "") {
+        return $handler . "&" . $url_query;
+    }
+    return $handler;
+}
+
+// ---- Main: match against all routes ----
+
+// Match method+url against a full route definition string.
+// Returns "handlerName" or "handlerName&key=val&..." or "404" if no match.
+function route_match(string $method, string $url, string $routes): string {
+    let $count = route_entry_count($routes);
+    let mut $i = 0;
+    for (let mut $i = 0; $i < $count; $i = $i + 1) {
+        let $entry = route_entry_get($routes, $i);
+        let $result = route_match_one($method, $url, $entry);
+        if ($result != "") {
+            return $result;
+        }
+    }
+    return "404";
+}
+
+// ---- Result helpers ----
+
+// Extract handler name from route_match result.
+// "home_index" → "home_index"
+// "user_detail&id=42" → "user_detail"
+// "404" → "404"
+function route_handler(string $result): string {
+    if (phprs_str_contains($result, "&") == 0) {
+        return $result;
+    }
+    return phprs_str_split($result, "&", 0);
+}
+
+// Extract params string from route_match result.
+// "home_index" → ""
+// "user_detail&id=42" → "id=42"
+function route_params(string $result): string {
+    if (phprs_str_contains($result, "&") == 0) {
+        return "";
+    }
+    // Everything after the first &
+    let $handler = phprs_str_split($result, "&", 0);
+    return phprs_str_replace($result, $handler . "&", "");
+}
+
+// Get a single param value from params string.
+function route_param(string $params, string $key): string {
+    if ($params == "") { return ""; }
+    let $search = $key . "=";
+    let mut $i = 0;
+    for (let mut $i = 0; $i < 100; $i = $i + 1) {
+        let $seg = phprs_str_split($params, "&", $i);
+        if ($seg == "") { $i = 200; }
+        else {
+            if (phprs_str_starts_with($seg, $search)) {
+                return phprs_str_replace($seg, $search, "");
+            }
+        }
+    }
+    return "";
+}
+// ---- Route table builder ----
+
+// Add a route entry to the routes string. Handles "|" separator automatically.
+// Usage:
+//   let $RT = "";
+//   $RT = route_add($RT, "GET", "/", "home_index");
+//   $RT = route_add($RT, "GET", "/api/user?user_id={int}", "api_user");
+function route_add(string $routes, string $method, string $path, string $handler): string {
+    if ($routes != "") { $routes = $routes . "|"; }
+    return $routes . $method . " " . $path . " => " . $handler;
+}
+?>

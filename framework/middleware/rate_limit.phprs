@@ -1,0 +1,23 @@
+<?phprs
+// Rate Limit Middleware — fixed-window IP-based request limiting
+// Usage:
+//   include "framework/middleware/rate_limit.phprs";
+//   rate_limit_config(100, 60);          // max 100 req per 60s per IP
+//   if (!rate_limit_allow($ip)) { ... }  // deny if over limit
+
+extern function phprs_rate_limit_init(int $max_req, int $window_sec): void;
+extern function phprs_rate_limit_check(string $ip): int;
+
+function rate_limit_config(int $max_req, int $window_sec): void {
+    phprs_rate_limit_init($max_req, $window_sec);
+}
+
+function rate_limit_allow(string $ip): int {
+    return phprs_rate_limit_check($ip);
+}
+
+function rate_limit_429_response(): string {
+    return phprs_http_response(429, "text/plain; charset=utf-8",
+        "429 Too Many Requests");
+}
+?>

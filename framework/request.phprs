@@ -1,0 +1,262 @@
+<?phprs
+// Request parsing — extract structured data from raw HTTP.
+
+// Parse a raw HTTP request into a query-string-style format.
+// Returns: method=GET&path=/hello&body=...
+function request_parse(string $raw): string {
+    let $method = phprs_http_method($raw);
+    let $path = phprs_http_path($raw);
+    let $body = phprs_http_body($raw);
+
+    let $result = "method=" . $method;
+    $result = $result . "&path=" . $path;
+    if ($body != "") {
+        $result = $result . "&body=" . $body;
+    }
+    return $result;
+}
+
+// Get the value of a named field from a request param string.
+// Param string format: key1=val1&key2=val2
+function request_param(string $params, string $key): string {
+    let $search = $key . "=";
+    let $found = "";
+    let mut $i = 0;
+    for (let mut $i = 0; $i < 100; $i = $i + 1) {
+        let $segment = phprs_str_split($params, "&", $i);
+        if ($segment == "") {
+            $i = 200; // force loop exit
+        } else {
+            if (phprs_str_starts_with($segment, $search)) {
+                $found = phprs_str_replace($segment, $search, "");
+                $i = 200; // force loop exit
+            }
+        }
+    }
+    return $found;
+}
+
+// ---- $_SERVER equivalent ----
+
+// Parse raw HTTP request into SERVER variables (like PHP's $_SERVER).
+// Returns a flat key=val&key=val string.
+// Keys: REQUEST_METHOD, REQUEST_URI, QUERY_STRING, HTTP_HOST,
+//       HTTP_USER_AGENT, HTTP_ACCEPT, SERVER_PORT, REMOTE_ADDR,
+//       REQUEST_TIME, CONTENT_TYPE, CONTENT_LENGTH, HTTP_REFERER
+function request_server(string $raw, int $port): string {
+    let $method = phprs_http_method($raw);
+    let $full_path = phprs_http_path($raw);
+    let $host = phprs_http_header($raw, "Host");
+    let $ua = phprs_http_header($raw, "User-Agent");
+    let $accept = phprs_http_header($raw, "Accept");
+    let $ct = phprs_http_header($raw, "Content-Type");
+    let $cl = phprs_http_header($raw, "Content-Length");
+    let $referer = phprs_http_header($raw, "Referer");
+    let $ts = time();
+
+    // Split path into URI and query string
+    let $uri = $full_path;
+    let $qs = "";
+    if (phprs_str_contains($full_path, "?") == 1) {
+        $uri = phprs_str_split($full_path, "?", 0);
+        $qs = phprs_str_split($full_path, "?", 1);
+    }
+
+    let $result = "REQUEST_METHOD=" . $method;
+    $result = $result . "&REQUEST_URI=" . $uri;
+    $result = $result . "&QUERY_STRING=" . $qs;
+    $result = $result . "&HTTP_HOST=" . $host;
+    $result = $result . "&HTTP_USER_AGENT=" . $ua;
+    $result = $result . "&HTTP_ACCEPT=" . $accept;
+    $result = $result . "&SERVER_PORT=" . $port;
+    $result = $result . "&REMOTE_ADDR=127.0.0.1";
+    $result = $result . "&REQUEST_TIME=" . $ts;
+    if ($ct != "") { $result = $result . "&CONTENT_TYPE=" . $ct; }
+    if ($cl != "") { $result = $result . "&CONTENT_LENGTH=" . $cl; }
+    if ($referer != "") { $result = $result . "&HTTP_REFERER=" . $referer; }
+    return $result;
+}
+
+// Get a single value from server info string.
+function server_param(string $server, string $key): string {
+    return request_param($server, $key);
+}
+
+// ---- $_GET equivalent — parse query string from URL ----
+// Returns "key1=val1&key2=val2" from the URL query string.
+function request_get(string $raw): string {
+    let $full = phprs_http_path($raw);
+    if (phprs_str_contains($full, "?") == 0) { return ""; }
+    return phprs_str_split($full, "?", 1);
+}
+
+// ---- $_POST equivalent — parse POST body (form-urlencoded) ----
+// Returns the raw POST body string.
+function request_post(string $raw): string {
+    let $method = phprs_http_method($raw);
+    if ($method != "POST" && $method != "PUT" && $method != "PATCH") { return ""; }
+    return phprs_http_body($raw);
+}
+
+// ---- $_COOKIE equivalent — parse Cookie header ----
+// Returns "key1=val1; key2=val2" from the Cookie header.
+function request_cookie(string $raw): string {
+    return phprs_http_header($raw, "Cookie");
+}
+
+// Get a single cookie value by name.
+function cookie_param(string $raw, string $key): string {
+    let $cookies = request_cookie($raw);
+    if ($cookies == "") { return ""; }
+    let $search = $key . "=";
+    let mut $i = 0;
+    for (let mut $i = 0; $i < 50; $i = $i + 1) {
+        let $part = phprs_str_split($cookies, "; ", $i);
+        if ($part == "") { return ""; }
+        if (phprs_str_starts_with($part, $search)) {
+            return phprs_str_replace($part, $search, "");
+        }
+    }
+    return "";
+}
+
+// ---- $_FILES stub — multipart file upload parsing ----
+// Returns "" (not yet implemented).
+function request_files(string $raw): string {
+    let $_ = $raw;
+    return "";
+}
+
+// ---- $_SESSION — file-based session store with security hardening ----
+// Session files: data/session_<id>.txt
+
+// Validate session ID — only allow alphanumeric + underscore + dash.
+// Prevents path traversal attacks via cookie injection.
+function session_valid_id(string $sid): int {
+    if ($sid == "") { return 0; }
+    if (strlen($sid) > 64) { return 0; }
+    // Whitelist: only [a-zA-Z0-9_-]
+    let $work = $sid;
+    $work = phprs_str_replace($work, "a", ""); $work = phprs_str_replace($work, "b", "");
+    $work = phprs_str_replace($work, "c", ""); $work = phprs_str_replace($work, "d", "");
+    $work = phprs_str_replace($work, "e", ""); $work = phprs_str_replace($work, "f", "");
+    $work = phprs_str_replace($work, "g", ""); $work = phprs_str_replace($work, "h", "");
+    $work = phprs_str_replace($work, "i", ""); $work = phprs_str_replace($work, "j", "");
+    $work = phprs_str_replace($work, "k", ""); $work = phprs_str_replace($work, "l", "");
+    $work = phprs_str_replace($work, "m", ""); $work = phprs_str_replace($work, "n", "");
+    $work = phprs_str_replace($work, "o", ""); $work = phprs_str_replace($work, "p", "");
+    $work = phprs_str_replace($work, "q", ""); $work = phprs_str_replace($work, "r", "");
+    $work = phprs_str_replace($work, "s", ""); $work = phprs_str_replace($work, "t", "");
+    $work = phprs_str_replace($work, "u", ""); $work = phprs_str_replace($work, "v", "");
+    $work = phprs_str_replace($work, "w", ""); $work = phprs_str_replace($work, "x", "");
+    $work = phprs_str_replace($work, "y", ""); $work = phprs_str_replace($work, "z", "");
+    $work = phprs_str_replace($work, "A", ""); $work = phprs_str_replace($work, "B", "");
+    $work = phprs_str_replace($work, "C", ""); $work = phprs_str_replace($work, "D", "");
+    $work = phprs_str_replace($work, "E", ""); $work = phprs_str_replace($work, "F", "");
+    $work = phprs_str_replace($work, "G", ""); $work = phprs_str_replace($work, "H", "");
+    $work = phprs_str_replace($work, "I", ""); $work = phprs_str_replace($work, "J", "");
+    $work = phprs_str_replace($work, "K", ""); $work = phprs_str_replace($work, "L", "");
+    $work = phprs_str_replace($work, "M", ""); $work = phprs_str_replace($work, "N", "");
+    $work = phprs_str_replace($work, "O", ""); $work = phprs_str_replace($work, "P", "");
+    $work = phprs_str_replace($work, "Q", ""); $work = phprs_str_replace($work, "R", "");
+    $work = phprs_str_replace($work, "S", ""); $work = phprs_str_replace($work, "T", "");
+    $work = phprs_str_replace($work, "U", ""); $work = phprs_str_replace($work, "V", "");
+    $work = phprs_str_replace($work, "W", ""); $work = phprs_str_replace($work, "X", "");
+    $work = phprs_str_replace($work, "Y", ""); $work = phprs_str_replace($work, "Z", "");
+    $work = phprs_str_replace($work, "0", ""); $work = phprs_str_replace($work, "1", "");
+    $work = phprs_str_replace($work, "2", ""); $work = phprs_str_replace($work, "3", "");
+    $work = phprs_str_replace($work, "4", ""); $work = phprs_str_replace($work, "5", "");
+    $work = phprs_str_replace($work, "6", ""); $work = phprs_str_replace($work, "7", "");
+    $work = phprs_str_replace($work, "8", ""); $work = phprs_str_replace($work, "9", "");
+    $work = phprs_str_replace($work, "_", ""); $work = phprs_str_replace($work, "-", "");
+    if ($work == "") { return 1; }
+    return 0;
+}
+
+// Start/resume a session. Returns the session ID.
+// Uses cryptographically stronger ID generation.
+function session_start(string $raw): string {
+    let $id = cookie_param($raw, "PHPRS_SESSID");
+    if ($id != "") {
+        // Validate existing session ID — reject tampered cookies
+        if (session_valid_id($id) == 0) { $id = ""; }
+    }
+    if ($id == "") {
+        // Generate session ID: md5(uniqid + microtime)
+        $id = "sess_" . md5(uniqid("") . microtime());
+    }
+    return $id;
+}
+
+// Get a value from the session file. Returns "" if not found.
+function session_get(string $sid, string $key): string {
+    if ($sid == "" || session_valid_id($sid) == 0) { return ""; }
+    let $file = "data/session_" . $sid . ".txt";
+    let $content = phprs_file_read($file);
+    if ($content == "") { return ""; }
+    return request_param($content, $key);
+}
+
+// Set a value in the session file.
+function session_set(string $sid, string $key, string $value): void {
+    if ($sid == "" || session_valid_id($sid) == 0) { return; }
+    let $file = "data/session_" . $sid . ".txt";
+    let $content = phprs_file_read($file);
+    let $new_content = "";
+    if ($content != "") {
+        let $search = $key . "=";
+        let mut $i = 0;
+        for (let mut $i = 0; $i < 100; $i = $i + 1) {
+            let $part = phprs_str_split($content, "&", $i);
+            if ($part == "") { $i = 200; }
+            else {
+                if (phprs_str_starts_with($part, $search) == 0) {
+                    if ($new_content != "") { $new_content = $new_content . "&"; }
+                    $new_content = $new_content . $part;
+                }
+            }
+        }
+    }
+    if ($new_content != "") { $new_content = $new_content . "&"; }
+    $new_content = $new_content . $key . "=" . $value;
+    phprs_file_write($file, $new_content);
+}
+
+// Destroy a session (delete the session file).
+function session_destroy(string $sid): void {
+    if ($sid == "" || session_valid_id($sid) == 0) { return; }
+    let $file = "data/session_" . $sid . ".txt";
+    unlink($file);
+}
+
+// Set a session cookie header string (for Set-Cookie response header).
+function session_cookie_header(string $sid): string {
+    return "Set-Cookie: PHPRS_SESSID=" . $sid . "; Path=/; HttpOnly; SameSite=Strict\r\n";
+}
+
+// ---- CSRF Protection ----
+
+// Generate a CSRF token tied to the session.
+// Store in session under key "_csrf_token".
+function csrf_token(string $raw): string {
+    let $sid = session_start($raw);
+    let $token = session_get($sid, "_csrf_token");
+    if ($token == "") {
+        $token = md5(uniqid("csrf_") . microtime() . rand(0, 999999));
+        session_set($sid, "_csrf_token", $token);
+    }
+    return $token;
+}
+
+// Verify a CSRF token. Returns 1 if valid, 0 otherwise.
+function csrf_verify(string $raw, string $submitted): int {
+    let $token = csrf_token($raw);
+    if ($token == $submitted) { return 1; }
+    return 0;
+}
+
+// Generate a hidden CSRF input field for HTML forms.
+function csrf_field(string $raw): string {
+    return "<input type=\"hidden\" name=\"_csrf_token\" value=\"" . csrf_token($raw) . "\">";
+}
+?>

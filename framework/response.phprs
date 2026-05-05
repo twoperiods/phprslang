@@ -1,0 +1,30 @@
+<?phprs
+// Response builders — generate HTTP response strings.
+
+function response_html(int $status, string $html): string {
+    return phprs_http_response($status, "text/html; charset=utf-8", $html);
+}
+
+function response_json(int $status, string $json): string {
+    return phprs_http_response($status, "application/json", $json);
+}
+
+function response_text(int $status, string $text): string {
+    return phprs_http_response($status, "text/plain; charset=utf-8", $text);
+}
+
+function response_redirect(string $location): string {
+    let $body = "<html><body>Redirecting to <a href=\"" . $location . "\">" . $location . "</a></body></html>";
+    return phprs_http_response(302, "text/html", $body);
+}
+
+function response_404(): string {
+    let $body = "<html><body><h1>404 Not Found</h1><p>The requested page was not found.</p></body></html>";
+    return phprs_http_response(404, "text/html; charset=utf-8", $body);
+}
+
+function response_500(): string {
+    let $body = "<html><body><h1>500 Internal Server Error</h1><p>Something went wrong.</p></body></html>";
+    return phprs_http_response(500, "text/html; charset=utf-8", $body);
+}
+?>

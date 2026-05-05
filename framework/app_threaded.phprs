@@ -1,0 +1,41 @@
+<?phprs
+// Threaded server bootstrap — high-concurrency HTTP server with thread-per-connection.
+
+include "framework/runtime.phprs";
+
+// Run a threaded HTTP server.
+// port: TCP port to listen on
+// handler_name: name of a PHPRS function with signature (string $raw): string
+//   The handler receives the raw HTTP request and must return the full HTTP response.
+function app_run_threaded(int $port, string $handler_name): void {
+    let $server = phprs_server_new($port);
+
+    if ($server < 0) {
+        echo "Failed to start server on port " . $port . "\n";
+        return;
+    }
+
+    echo "=== PHPRS Threaded Server ===\n";
+    echo "Server started on http://localhost:" . $port . "\n";
+    echo "Model: thread-per-connection\n";
+    echo "Press Ctrl+C to stop.\n";
+
+    // Main accept loop — spawns a thread for each connection
+    for (let mut $running = 1; $running == 1; ) {
+        let $client = phprs_server_accept($server);
+
+        if ($client >= 0) {
+            let $raw = phprs_socket_read($client, 65536);
+            let $spawned = phprs_thread_spawn($handler_name, $client, $raw);
+            if ($spawned == 0) {
+                // Thread spawn failed — handle inline as fallback
+                let $response = phprs_http_response(500, "text/plain", "Server busy");
+                phprs_socket_write($client, $response);
+                phprs_socket_close($client);
+            }
+        }
+    }
+
+    phprs_socket_close($server);
+}
+?>

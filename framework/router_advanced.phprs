@@ -1,0 +1,288 @@
+<?phprs
+// Advanced Router — supports query-parameter patterns with type constraints.
+// Requires: include "framework/router.phprs" (for router_extract_params, etc.)
+//
+// Pattern format: "/path?param1={type1}&param2={type2}"
+//   Combined:       "/users/{id}/posts?page={int}&sort={string}"
+//
+// Supported types: {int}, {string}, {float}, {any}
+//   {int}    — non-empty, only digits (0-9) with optional leading '-'
+//   {float}  — non-empty, digits with optional '.' and leading '-'
+//   {string} — any non-empty value
+//   {any}    — any value, including empty
+
+// ---- Type validators ----
+
+// Returns 1 if s is a valid integer string (e.g. "42", "-7", "0")
+function router_is_int(string $s): int {
+    if ($s == "") { return 0; }
+    // Strip leading minus once
+    let $work = $s;
+    if (phprs_str_starts_with($work, "-") == 1) {
+        $work = phprs_str_replace($work, "-", "");
+    }
+    if ($work == "") { return 0; }
+    // Remove all digit characters; if anything remains, it's not an int
+    $work = phprs_str_replace($work, "0", "");
+    $work = phprs_str_replace($work, "1", "");
+    $work = phprs_str_replace($work, "2", "");
+    $work = phprs_str_replace($work, "3", "");
+    $work = phprs_str_replace($work, "4", "");
+    $work = phprs_str_replace($work, "5", "");
+    $work = phprs_str_replace($work, "6", "");
+    $work = phprs_str_replace($work, "7", "");
+    $work = phprs_str_replace($work, "8", "");
+    $work = phprs_str_replace($work, "9", "");
+    if ($work == "") { return 1; }
+    return 0;
+}
+
+// Returns 1 if s is a valid float string (e.g. "3.14", "-0.5", "42", "0.0")
+function router_is_float(string $s): int {
+    if ($s == "") { return 0; }
+    // Strip leading minus once
+    let $work = $s;
+    if (phprs_str_starts_with($work, "-") == 1) {
+        $work = phprs_str_replace($work, "-", "");
+    }
+    if ($work == "") { return 0; }
+    // Allow at most one dot; remove it for digit checking
+    let $dot_removed = $work;
+    if (phprs_str_contains($work, ".") == 1) {
+        $dot_removed = phprs_str_replace($work, ".", "");
+    }
+    // After removing dot and digits, should be empty
+    $dot_removed = phprs_str_replace($dot_removed, "0", "");
+    $dot_removed = phprs_str_replace($dot_removed, "1", "");
+    $dot_removed = phprs_str_replace($dot_removed, "2", "");
+    $dot_removed = phprs_str_replace($dot_removed, "3", "");
+    $dot_removed = phprs_str_replace($dot_removed, "4", "");
+    $dot_removed = phprs_str_replace($dot_removed, "5", "");
+    $dot_removed = phprs_str_replace($dot_removed, "6", "");
+    $dot_removed = phprs_str_replace($dot_removed, "7", "");
+    $dot_removed = phprs_str_replace($dot_removed, "8", "");
+    $dot_removed = phprs_str_replace($dot_removed, "9", "");
+    if ($dot_removed == "") { return 1; }
+    return 0;
+}
+
+// ---- URL splitting ----
+
+// Split a full URL (path + query string) into "path=...&query=..."
+function router_split_url(string $url): string {
+    if (phprs_str_contains($url, "?") == 0) {
+        return "path=" . $url . "&query=";
+    }
+    let $path = phprs_str_split($url, "?", 0);
+    let $query = phprs_str_split($url, "?", 1);
+    return "path=" . $path . "&query=" . $query;
+}
+
+// Extract the path part from a router_split_url result
+function router_url_path(string $parsed): string {
+    let $part = phprs_str_split($parsed, "&", 0);
+    return phprs_str_replace($part, "path=", "");
+}
+
+// Extract the query part from a router_split_url result
+function router_url_query(string $parsed): string {
+    let $part = phprs_str_split($parsed, "&", 1);
+    return phprs_str_replace($part, "query=", "");
+}
+
+// ---- Pattern matching with query params ----
+
+// Parse a query-pattern part into parameter names and types.
+// Input:  "user_id={int}&name={string}"
+// Output: "names=user_id,name&types=int,string"
+function router_parse_query_pattern(string $query_pattern): string {
+    if ($query_pattern == "") { return "names=&types="; }
+    let mut $names = "";
+    let mut $types = "";
+    let mut $i = 0;
+    for (let mut $i = 0; $i < 50; $i = $i + 1) {
+        let $seg = phprs_str_split($query_pattern, "&", $i);
+        if ($seg == "") { $i = 200; }
+        else {
+            // Each segment is like "user_id={int}"
+            let $eq_pos = phprs_str_split($seg, "=", 0);  // "user_id"
+            let $type_part = phprs_str_split($seg, "=", 1); // "{int}"
+            // Strip { and }
+            let $type = phprs_str_replace($type_part, "{", "");
+            $type = phprs_str_replace($type, "}", "");
+            if ($names != "") {
+                $names = $names . ",";
+                $types = $types . ",";
+            }
+            $names = $names . $eq_pos;
+            $types = $types . $type;
+        }
+    }
+    return "names=" . $names . "&types=" . $types;
+}
+
+// Get the nth name from a parsed names string
+function router_pattern_name_at(string $names_csv, int $index): string {
+    return phprs_str_split($names_csv, ",", $index);
+}
+
+// Get the nth type from a parsed types string
+function router_pattern_type_at(string $types_csv, int $index): string {
+    return phprs_str_split($types_csv, ",", $index);
+}
+
+// Count items in a CSV string
+function router_csv_count(string $csv): int {
+    if ($csv == "") { return 0; }
+    let mut $i = 0;
+    for (let mut $i = 0; $i < 100; $i = $i + 1) {
+        let $seg = phprs_str_split($csv, ",", $i);
+        if ($seg == "") { return $i; }
+    }
+    return 0;
+}
+
+// ---- Main: match URL against a full pattern (path + query) ----
+
+// Match a full URL against a pattern with optional query parameter types.
+// Pattern examples:
+//   "/api/user?user_id={int}&name={string}"
+//   "/users/{id}/posts?page={int}"
+//   "/search?q={string}"
+//   "/about"  (no query params)
+//
+// Returns 1 if the URL matches (path matches + all query params present and type-valid).
+function router_match_advanced(string $url, string $pattern): int {
+    let $url_parsed = router_split_url($url);
+    let $url_path = router_url_path($url_parsed);
+    let $url_query = router_url_query($url_parsed);
+
+    let $pat_parsed = router_split_url($pattern);
+    let $pat_path = router_url_path($pat_parsed);
+    let $pat_query = router_url_query($pat_parsed);
+
+    // 1. Path must match (reuse existing router)
+    if (router_path_matches($url_path, $pat_path) == 0) {
+        return 0;
+    }
+
+    // 2. No query pattern → match (allow any query or none)
+    if ($pat_query == "") {
+        return 1;
+    }
+
+    // 3. Parse the pattern's expected query params
+    let $pqp = router_parse_query_pattern($pat_query);
+    let $pat_names = phprs_str_replace(phprs_str_split($pqp, "&", 0), "names=", "");
+    let $pat_types = phprs_str_replace(phprs_str_split($pqp, "&", 1), "types=", "");
+    let $pat_count = router_csv_count($pat_names);
+
+    // 4. Check each expected param exists in URL and type matches
+    let mut $idx = 0;
+    for (let mut $idx = 0; $idx < $pat_count; $idx = $idx + 1) {
+        let $param_name = router_pattern_name_at($pat_names, $idx);
+        let $param_type = router_pattern_type_at($pat_types, $idx);
+
+        // Extract value from URL's query string
+        let $val = router_query_param_get($url_query, $param_name);
+
+        // Type check
+        if ($param_type == "int") {
+            if (router_is_int($val) == 0) { return 0; }
+        } else {
+            if ($param_type == "float") {
+                if (router_is_float($val) == 0) { return 0; }
+            } else {
+                if ($param_type == "string") {
+                    if ($val == "") { return 0; }
+                } else {
+                    // "any" — always passes
+                    let $_pass = 1;
+                }
+            }
+        }
+    }
+    return 1;
+}
+
+// ---- Parameter extraction ----
+
+// Get a single query parameter value by name from a query string.
+function router_query_param_get(string $query_string, string $key): string {
+    if ($query_string == "") { return ""; }
+    let $search = $key . "=";
+    let mut $i = 0;
+    for (let mut $i = 0; $i < 100; $i = $i + 1) {
+        let $segment = phprs_str_split($query_string, "&", $i);
+        if ($segment == "") {
+            $i = 200;
+        } else {
+            if (phprs_str_starts_with($segment, $search)) {
+                return phprs_url_decode(phprs_str_replace($segment, $search, ""));
+            }
+        }
+    }
+    return "";
+}
+
+// Extract all parameters (path params + query params) from a URL matched against a pattern.
+// Returns a flat "key1=val1&key2=val2&..." string.
+//
+// Example:
+//   router_extract_params_advanced("/users/42?page=3", "/users/{id}?page={int}")
+//   → "id=42&page=3"
+function router_extract_params_advanced(string $url, string $pattern): string {
+    let $url_parsed = router_split_url($url);
+    let $url_path = router_url_path($url_parsed);
+    let $url_query = router_url_query($url_parsed);
+
+    let $pat_parsed = router_split_url($pattern);
+    let $pat_path = router_url_path($pat_parsed);
+    let $pat_query = router_url_query($pat_parsed);
+
+    let mut $result = "";
+
+    // 1. Extract path params (e.g. /users/{id} → id=42)
+    let $path_params = router_extract_params($url_path, $pat_path);
+    if ($path_params != "") {
+        $result = $path_params;
+    }
+
+    // 2. Extract query params
+    if ($pat_query != "") {
+        let $pqp = router_parse_query_pattern($pat_query);
+        let $pat_names = phprs_str_replace(phprs_str_split($pqp, "&", 0), "names=", "");
+        let $pat_count = router_csv_count($pat_names);
+
+        let mut $idx = 0;
+        for (let mut $idx = 0; $idx < $pat_count; $idx = $idx + 1) {
+            let $param_name = router_pattern_name_at($pat_names, $idx);
+            let $val = router_query_param_get($url_query, $param_name);
+
+            if ($result != "") {
+                $result = $result . "&";
+            }
+            $result = $result . $param_name . "=" . $val;
+        }
+    }
+
+    return $result;
+}
+
+// ---- Convenience: find matching route in parallel arrays ----
+
+// Like router_find, but uses advanced matching (supports query params in patterns).
+// Returns -1 if no match found.
+function router_find_advanced(string $method, string $url, [string] $methods, [string] $patterns): int {
+    let $count = count($methods);
+    let mut $i = 0;
+    for (let mut $i = 0; $i < $count; $i = $i + 1) {
+        if ($methods[$i] == $method) {
+            if (router_match_advanced($url, $patterns[$i])) {
+                return $i;
+            }
+        }
+    }
+    return -1;
+}
+?>

@@ -1,0 +1,53 @@
+<?phprs
+// PHPRS HTTP Client Demo
+// Demonstrates making outbound HTTP requests to third-party APIs.
+// Build: phprs build examples/http_client/demo.phprs -o http_demo.exe
+// Run:   ./http_demo.exe
+
+include "../../framework/runtime.phprs";
+include "../../framework/http_client.phprs";
+
+// ---- URL Parser Test ----
+echo "=== URL Parsing Tests ===\n";
+let $parsed1 = http_parse_url("http://example.com/api/data");
+echo "http://example.com/api/data -> " . $parsed1 . "\n";
+echo "  Host: " . http_parsed_host($parsed1) . "\n";
+echo "  Path: " . http_parsed_path($parsed1) . "\n";
+
+let $parsed2 = http_parse_url("http://example.com");
+echo "http://example.com -> " . $parsed2 . "\n";
+echo "  Host: " . http_parsed_host($parsed2) . "\n";
+echo "  Path: " . http_parsed_path($parsed2) . "\n";
+
+// ---- DNS Resolution Test ----
+echo "\n=== DNS Resolution Test ===\n";
+let $ip = phprs_dns_resolve("example.com");
+echo "example.com resolves to: " . $ip . "\n";
+
+// ---- HTTP GET Test (example.com) ----
+echo "\n=== HTTP GET Test (example.com) ===\n";
+let $response = http_get("http://example.com/");
+let $status = http_status($response);
+echo "Status: " . $status . "\n";
+
+if ($status >= 200) {
+    if ($status < 300) {
+        echo "Request successful!\n";
+    } else {
+        echo "Request returned non-200 status.\n";
+    }
+} else {
+    echo "Request failed (connection error or timeout).\n";
+}
+
+echo "\n=== Response Headers ===\n";
+// Show first few headers
+let $header_line1 = phprs_str_split($response, "\r\n", 0);
+let $header_line2 = phprs_str_split($response, "\r\n", 1);
+let $header_line3 = phprs_str_split($response, "\r\n", 2);
+echo $header_line1 . "\n";
+echo $header_line2 . "\n";
+echo $header_line3 . "\n";
+
+echo "\n=== Demo Complete ===\n";
+?>
