@@ -70,16 +70,22 @@ echo json_encode(["status" => "ok", "data" => $items]);
 
 | 分类 | 函数 |
 |---|---|
-| **字符串** | `strlen`, `substr`, `strpos`, `explode`, `implode`, `sprintf`, `trim`, `str_replace`, `strtolower`, `strtoupper`, `htmlspecialchars`, `nl2br`, `strip_tags` |
-| **文件 I/O** | `file_get_contents`, `file_put_contents`, `file_exists`, `is_dir`, `mkdir`, `unlink`, `basename`, `dirname`, `scandir`, `realpath` |
+| **字符串** | `strlen`, `substr`, `strpos`, `stripos`, `strrpos`, `explode`, `implode`, `sprintf`, `trim`, `ltrim`, `rtrim`, `str_replace`, `strtolower`, `strtoupper`, `ucfirst`, `htmlspecialchars`, `nl2br`, `strip_tags`, `str_repeat`, `number_format`, `phprs_str_contains`, `phprs_str_starts_with`, `phprs_str_ends_with`, `phprs_str_split` |
+| **数组** | `array_push`, `array_pop`, `array_shift`, `array_unshift`, `array_keys`, `array_values`, `array_merge`, `array_flip`, `array_slice`, `array_sum`, `array_unique`, `array_reverse`, `array_filter`, `array_map`, `array_reduce`, `array_diff`, `array_combine`, `array_column`, `array_fill`, `array_rand`, `in_array`, `array_search`, `array_key_exists`, `range`, `sort`, `rsort` |
+| **文件 I/O** | `file_get_contents`, `file_put_contents`, `file_exists`, `is_dir`, `is_file`, `mkdir`, `unlink`, `basename`, `dirname`, `scandir`, `realpath`, `getcwd` |
 | **JSON** | `json_encode`, `json_decode`, `phprs_json_get_string`, `phprs_json_get_int` |
-| **HTTP** | `phprs_http_response`, `phprs_http_method`, `phprs_http_path`, `phprs_http_header`, `phprs_http_body`, `curl`, `curl_async` |
+| **URL/编码** | `urlencode`, `urldecode`, `parse_url`, `http_build_query`, `base64_encode`, `base64_decode` |
+| **HTTP** | `phprs_http_response`, `phprs_http_method`, `phprs_http_path`, `phprs_http_header`, `phprs_http_body`, `phprs_url_decode`, `phprs_request_parse`, `curl`, `curl_async`, `curl_wait`, `curl_is_done` |
+| **HTTP 客户端** | `phprs_dns_resolve`, `phprs_tcp_connect`, `phprs_tls_connect`, `phprs_socket_read_all`, `phprs_http_build_request`, `phprs_http_response_status`, `phprs_http_response_body` |
 | **网络** | `phprs_server_new`, `phprs_server_accept`, `phprs_socket_read`, `phprs_socket_write`, `phprs_socket_close` |
-| **WebSocket** | `phprs_is_websocket_upgrade`, `phprs_ws_handshake_response`, `phprs_ws_read_frame`, `phprs_ws_write_frame`, `phprs_ws_close` |
-| **类型** | `is_null`, `is_int`, `is_float`, `is_string`, `is_bool`, `is_array`, `empty`, `isset`, `gettype` |
+| **WebSocket** | `phprs_is_websocket_upgrade`, `phprs_ws_handshake_response`, `phprs_ws_read_frame`, `phprs_ws_write_frame`, `phprs_ws_send_pong`, `phprs_ws_close` |
+| **类型** | `is_null`, `is_int`, `is_float`, `is_string`, `is_bool`, `is_array`, `empty`, `isset`, `unset`, `gettype` |
 | **哈希** | `md5`, `sha1`, `uniqid` |
 | **数学** | `abs`, `ceil`, `floor`, `round`, `max`, `min`, `rand`, `mt_rand`, `pow`, `sqrt` |
 | **日期** | `time`, `date`, `strtotime`, `microtime` |
+| **多线程** | `phprs_thread_spawn`, `phprs_thread_pool_init`, `phprs_thread_pool_enqueue`, `phprs_thread_pool_shutdown`, `phprs_mutex_new`, `phprs_mutex_lock`, `phprs_mutex_unlock` |
+| **中间件** | `phprs_rate_limit_init`, `phprs_rate_limit_check`, `phprs_cors_set_config`, `phprs_cors_get_origin`, `phprs_cors_get_methods`, `phprs_cors_get_headers`, `phprs_cors_is_preflight` |
+| **系统** | `sleep`, `usleep` |
 
 ## 架构
 
