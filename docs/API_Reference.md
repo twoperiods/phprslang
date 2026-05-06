@@ -14,7 +14,7 @@ PHPRS 所有内置函数与运行时系统函数的完整参考。
 8. [日期时间函数](#日期时间函数)
 9. [JSON 函数](#json-函数)
 10. [文件系统函数](#文件系统函数)
-11. [哈希与工具函数](#哈希与工具函数)
+11. [哈希与安全函数](#哈希与安全函数)
 12. [语言特性](#语言特性)
 13. [低级字符串函数 (phprs_* 前缀)](#低级字符串函数-phprs_-前缀)
 14. [Socket 网络原语](#socket-网络原语)
@@ -524,6 +524,42 @@ echo sprintf("Hello %s, you have %s new messages", "Alice", "5", "", "");
 echo number_format(1234567.89, 2);  // "1,234,567.89"
 ```
 
+### `chr(int $codepoint): string`
+
+将 Unicode 码点转换为对应的 UTF-8 字符串。
+
+```php
+echo chr(65);     // "A"
+echo chr(20013);  // "中"
+```
+
+### `ord(string $char): int`
+
+返回字符串第一个字符的 Unicode 码点值。
+
+```php
+echo ord("ABC");   // 65
+echo ord("中");    // 20013
+```
+
+### `addslashes(string $str): string`
+
+使用反斜线转义字符串中的特殊字符（单引号、双引号、反斜线、NUL）。
+
+```php
+let $escaped = addslashes("It's \"cool\"");
+echo $escaped;  // "It\'s \"cool\""
+```
+
+### `stripslashes(string $str): string`
+
+去除 `addslashes` 添加的反斜线转义。
+
+```php
+let $original = stripslashes("It\\'s \\\"cool\\\"");
+echo $original;  // "It's \"cool\""
+```
+
 ---
 
 ## URL 与编码函数
@@ -849,6 +885,46 @@ let $key = array_rand($arr, 1);
 echo $key;  // 随机输出 "a"、"b" 或 "c"
 ```
 
+### `array_chunk(array $arr, int $size, bool $preserve_keys): array`
+
+将数组分割成多个指定大小的块。
+
+```php
+let $arr = [1, 2, 3, 4, 5, 6, 7];
+let $chunks = array_chunk($arr, 2, false);
+// $chunks 是 [[1, 2], [3, 4], [5, 6], [7]]
+```
+
+### `array_count_values(array $arr): dict`
+
+统计数组中每个值的出现次数，返回以值为键、次数为值的字典。
+
+```php
+let $arr = ["a", "b", "a", "c", "b", "a"];
+let $counts = array_count_values($arr);
+// $counts 是 ["a" => 3, "b" => 2, "c" => 1]
+```
+
+### `array_product(array $arr): int|float`
+
+计算数组中所有值的乘积。
+
+```php
+echo array_product([2, 3, 4]);  // 24
+echo array_product([1.5, 2.0]); // 3.0
+```
+
+### `array_intersect(array $arr1, array $arr2): array`
+
+返回两个数组的交集（在 `$arr1` 中且值也存在于 `$arr2` 中的元素，保留 `$arr1` 的键）。
+
+```php
+let $a = [1, 2, 3, 4, 5];
+let $b = [3, 4, 5, 6, 7];
+let $inter = array_intersect($a, $b);
+// $inter 是 [3, 4, 5]
+```
+
 ---
 
 ## 数学函数
@@ -1087,9 +1163,67 @@ let $files = scandir("/path/to/dir");
 // $files 是 ["file1.txt", "file2.txt", "subdir"]
 ```
 
+### `copy(string $source, string $dest): bool`
+
+拷贝文件。成功返回 `true`，失败返回 `false`。
+
+```php
+if (copy("source.txt", "dest.txt")) {
+    echo "copied";
+}
+```
+
+### `rename(string $old, string $new): bool`
+
+重命名或移动文件。成功返回 `true`，失败返回 `false`。
+
+```php
+if (rename("old_name.txt", "new_name.txt")) {
+    echo "renamed";
+}
+```
+
+### `filesize(string $path): int`
+
+返回文件大小（字节），失败返回 `-1`。
+
+```php
+let $size = filesize("data.json");
+echo $size;  // 例如 1024
+```
+
+### `filemtime(string $path): int`
+
+返回文件最后修改时间的 Unix 时间戳，失败返回 `-1`。
+
+```php
+let $mtime = filemtime("data.json");
+echo date("Y-m-d H:i:s", $mtime);
+```
+
+### `pathinfo(string $path): string`
+
+解析文件路径，返回包含 `dirname`、`basename`、`extension`、`filename` 的 JSON 字符串。
+
+```php
+let $info = pathinfo("/var/www/index.html");
+echo $info;
+// {"dirname":"/var/www","basename":"index.html","extension":"html","filename":"index"}
+```
+
+### `move_uploaded_file(string $tmp, string $dest): bool`
+
+将上传的临时文件移动到目标位置。移动前会检查源文件是否存在。
+
+```php
+if (move_uploaded_file("/tmp/upload_abc", "uploads/file.txt")) {
+    echo "upload saved";
+}
+```
+
 ---
 
-## 哈希与工具函数
+## 哈希与安全函数
 
 ### `md5(string $s): string`
 
@@ -1157,6 +1291,44 @@ if (is_file("data.txt") == 1) {
 
 ```php
 echo getcwd();  // "/home/user/project"
+```
+
+### `password_hash(string $password, string $algo): string`
+
+对密码进行哈希处理。支持 `"sha1"`（默认）、`"sha256"`、`"bcrypt"` 算法。返回格式为 `算法$盐$哈希值` 的字符串。
+
+```php
+let $hash = password_hash("my_secret", "sha1");
+echo $hash;  // "sha1$a1b2c3...$d4e5f6..."
+```
+
+### `password_verify(string $password, string $hash): bool`
+
+验证密码是否与存储的哈希值匹配。使用常量时间比较以防止时序攻击。
+
+```php
+let $hash = password_hash("my_secret", "sha1");
+if (password_verify("my_secret", $hash)) {
+    echo "password correct";
+}
+```
+
+### `random_bytes(int $length): string`
+
+生成加密安全的随机字节，返回十六进制字符串（长度为 `$length * 2`）。
+
+```php
+let $token = random_bytes(16);
+echo $token;  // "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"（32 位十六进制）
+```
+
+### `random_int(int $min, int $max): int`
+
+生成加密安全的随机整数（包含边界）。
+
+```php
+let $dice = random_int(1, 6);
+echo $dice;  // 1-6 之间的随机整数
 ```
 
 ---
@@ -2277,6 +2449,12 @@ phprs_mutex_unlock($mutex);
 | `basename` | `(string): string` | 提取路径中的文件名 |
 | `dirname` | `(string): string` | 提取路径中的目录名 |
 | `scandir` | `(string): array` | 列出目录内容 |
+| `copy` | `(string, string): bool` | 拷贝文件 |
+| `rename` | `(string, string): bool` | 重命名/移动文件 |
+| `filesize` | `(string): int` | 获取文件大小 |
+| `filemtime` | `(string): int` | 获取文件修改时间 |
+| `pathinfo` | `(string): string` | 解析路径信息(JSON) |
+| `move_uploaded_file` | `(string, string): bool` | 移动上传文件 |
 | `array_push` | `(array, any): array` | 向数组末尾添加元素 |
 | `array_pop` | `(array): any` | 弹出数组最后一个元素 |
 | `array_shift` | `(array): any` | 移除数组第一个元素 |
@@ -2303,6 +2481,10 @@ phprs_mutex_unlock($mutex);
 | `array_column` | `(array, string): array` | 提取二维数组某一列 |
 | `array_fill` | `(int, int, any): array` | 填充数组 |
 | `array_rand` | `(any, int): any` | 随机取出键名 |
+| `array_chunk` | `(array, int, bool): array` | 数组分块 |
+| `array_count_values` | `(array): dict` | 统计值出现次数 |
+| `array_product` | `(array): int\|float` | 数组值乘积 |
+| `array_intersect` | `(array, array): array` | 数组交集 |
 | `str_replace` | `(string, string, string): string` | 子串替换 (PHP 兼容) |
 | `ltrim` | `(string): string` | 去除左侧空白 |
 | `rtrim` | `(string): string` | 去除右侧空白 |
@@ -2310,6 +2492,10 @@ phprs_mutex_unlock($mutex);
 | `ucfirst` | `(string): string` | 首字母大写 |
 | `sprintf` | `(string, string, string, string, string): string` | 格式化字符串 |
 | `number_format` | `(any, int): string` | 数字千位格式化 |
+| `chr` | `(int): string` | 码点转 UTF-8 字符 |
+| `ord` | `(string): int` | 字符转码点 |
+| `addslashes` | `(string): string` | 转义特殊字符 |
+| `stripslashes` | `(string): string` | 去除转义 |
 | `urlencode` | `(string): string` | URL 编码 |
 | `urldecode` | `(string): string` | URL 解码 |
 | `parse_url` | `(string): string` | 解析 URL |
@@ -2319,6 +2505,10 @@ phprs_mutex_unlock($mutex);
 | `md5` | `(string): string` | MD5 哈希 |
 | `sha1` | `(string): string` | SHA1 哈希 |
 | `uniqid` | `(string): string` | 生成唯一 ID |
+| `password_hash` | `(string, string): string` | 密码哈希 |
+| `password_verify` | `(string, string): bool` | 验证密码 |
+| `random_bytes` | `(int): string` | 生成安全随机字节(hex) |
+| `random_int` | `(int, int): int` | 生成安全随机整数 |
 | `sleep` | `(int): void` | 暂停(秒) |
 | `usleep` | `(int): void` | 暂停(微秒) |
 | `realpath` | `(string): string` | 规范化路径 |

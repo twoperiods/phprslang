@@ -63,6 +63,21 @@ pub struct Interpreter {
     cors_headers: String,
 }
 
+// Helper: convert a Value to a string key for hashing/comparison
+fn value_to_key(val: &Value) -> String {
+    match val {
+        Value::Int(n) => format!("i:{}", n),
+        Value::Float(f) => format!("f:{}", f),
+        Value::String_(s) => format!("s:{}", s),
+        Value::Bool(b) => format!("b:{}", b),
+        Value::Null => "n:null".to_string(),
+        Value::Array(_) => "a:array".to_string(),
+        Value::Dict(_) => "d:dict".to_string(),
+        Value::Function(_) => "u:function".to_string(),
+        Value::NativeFunction(_) => "u:native".to_string(),
+    }
+}
+
 impl Interpreter {
     pub fn new() -> Self {
         let mut interpreter = Self {
@@ -141,6 +156,157 @@ impl Interpreter {
             name: "curl_is_done".into(),
             params: vec![
                 FnParam { name: "handle".into(), ty: Some(TypeAnnotation::Int), by_ref: false, by_mut_ref: false },
+            ],
+            body: Box::new(Stmt::Block(vec![])),
+            closure_env: None,
+        });
+        // chr
+        self.functions.push(FunctionValue {
+            name: "chr".into(),
+            params: vec![FnParam { name: "codepoint".into(), ty: Some(TypeAnnotation::Int), by_ref: false, by_mut_ref: false }],
+            body: Box::new(Stmt::Block(vec![])),
+            closure_env: None,
+        });
+        // ord
+        self.functions.push(FunctionValue {
+            name: "ord".into(),
+            params: vec![FnParam { name: "char".into(), ty: Some(TypeAnnotation::String_), by_ref: false, by_mut_ref: false }],
+            body: Box::new(Stmt::Block(vec![])),
+            closure_env: None,
+        });
+        // addslashes
+        self.functions.push(FunctionValue {
+            name: "addslashes".into(),
+            params: vec![FnParam { name: "str".into(), ty: Some(TypeAnnotation::String_), by_ref: false, by_mut_ref: false }],
+            body: Box::new(Stmt::Block(vec![])),
+            closure_env: None,
+        });
+        // stripslashes
+        self.functions.push(FunctionValue {
+            name: "stripslashes".into(),
+            params: vec![FnParam { name: "str".into(), ty: Some(TypeAnnotation::String_), by_ref: false, by_mut_ref: false }],
+            body: Box::new(Stmt::Block(vec![])),
+            closure_env: None,
+        });
+        // copy
+        self.functions.push(FunctionValue {
+            name: "copy".into(),
+            params: vec![
+                FnParam { name: "source".into(), ty: Some(TypeAnnotation::String_), by_ref: false, by_mut_ref: false },
+                FnParam { name: "dest".into(), ty: Some(TypeAnnotation::String_), by_ref: false, by_mut_ref: false },
+            ],
+            body: Box::new(Stmt::Block(vec![])),
+            closure_env: None,
+        });
+        // rename
+        self.functions.push(FunctionValue {
+            name: "rename".into(),
+            params: vec![
+                FnParam { name: "old".into(), ty: Some(TypeAnnotation::String_), by_ref: false, by_mut_ref: false },
+                FnParam { name: "new".into(), ty: Some(TypeAnnotation::String_), by_ref: false, by_mut_ref: false },
+            ],
+            body: Box::new(Stmt::Block(vec![])),
+            closure_env: None,
+        });
+        // filesize
+        self.functions.push(FunctionValue {
+            name: "filesize".into(),
+            params: vec![FnParam { name: "path".into(), ty: Some(TypeAnnotation::String_), by_ref: false, by_mut_ref: false }],
+            body: Box::new(Stmt::Block(vec![])),
+            closure_env: None,
+        });
+        // filemtime
+        self.functions.push(FunctionValue {
+            name: "filemtime".into(),
+            params: vec![FnParam { name: "path".into(), ty: Some(TypeAnnotation::String_), by_ref: false, by_mut_ref: false }],
+            body: Box::new(Stmt::Block(vec![])),
+            closure_env: None,
+        });
+        // pathinfo
+        self.functions.push(FunctionValue {
+            name: "pathinfo".into(),
+            params: vec![FnParam { name: "path".into(), ty: Some(TypeAnnotation::String_), by_ref: false, by_mut_ref: false }],
+            body: Box::new(Stmt::Block(vec![])),
+            closure_env: None,
+        });
+        // move_uploaded_file
+        self.functions.push(FunctionValue {
+            name: "move_uploaded_file".into(),
+            params: vec![
+                FnParam { name: "tmp".into(), ty: Some(TypeAnnotation::String_), by_ref: false, by_mut_ref: false },
+                FnParam { name: "dest".into(), ty: Some(TypeAnnotation::String_), by_ref: false, by_mut_ref: false },
+            ],
+            body: Box::new(Stmt::Block(vec![])),
+            closure_env: None,
+        });
+        // password_hash
+        self.functions.push(FunctionValue {
+            name: "password_hash".into(),
+            params: vec![
+                FnParam { name: "password".into(), ty: Some(TypeAnnotation::String_), by_ref: false, by_mut_ref: false },
+                FnParam { name: "algo".into(), ty: Some(TypeAnnotation::String_), by_ref: false, by_mut_ref: false },
+            ],
+            body: Box::new(Stmt::Block(vec![])),
+            closure_env: None,
+        });
+        // password_verify
+        self.functions.push(FunctionValue {
+            name: "password_verify".into(),
+            params: vec![
+                FnParam { name: "password".into(), ty: Some(TypeAnnotation::String_), by_ref: false, by_mut_ref: false },
+                FnParam { name: "hash".into(), ty: Some(TypeAnnotation::String_), by_ref: false, by_mut_ref: false },
+            ],
+            body: Box::new(Stmt::Block(vec![])),
+            closure_env: None,
+        });
+        // random_bytes
+        self.functions.push(FunctionValue {
+            name: "random_bytes".into(),
+            params: vec![FnParam { name: "length".into(), ty: Some(TypeAnnotation::Int), by_ref: false, by_mut_ref: false }],
+            body: Box::new(Stmt::Block(vec![])),
+            closure_env: None,
+        });
+        // random_int
+        self.functions.push(FunctionValue {
+            name: "random_int".into(),
+            params: vec![
+                FnParam { name: "min".into(), ty: Some(TypeAnnotation::Int), by_ref: false, by_mut_ref: false },
+                FnParam { name: "max".into(), ty: Some(TypeAnnotation::Int), by_ref: false, by_mut_ref: false },
+            ],
+            body: Box::new(Stmt::Block(vec![])),
+            closure_env: None,
+        });
+        // array_chunk
+        self.functions.push(FunctionValue {
+            name: "array_chunk".into(),
+            params: vec![
+                FnParam { name: "arr".into(), ty: None, by_ref: false, by_mut_ref: false },
+                FnParam { name: "size".into(), ty: Some(TypeAnnotation::Int), by_ref: false, by_mut_ref: false },
+                FnParam { name: "preserve_keys".into(), ty: None, by_ref: false, by_mut_ref: false },
+            ],
+            body: Box::new(Stmt::Block(vec![])),
+            closure_env: None,
+        });
+        // array_count_values
+        self.functions.push(FunctionValue {
+            name: "array_count_values".into(),
+            params: vec![FnParam { name: "arr".into(), ty: None, by_ref: false, by_mut_ref: false }],
+            body: Box::new(Stmt::Block(vec![])),
+            closure_env: None,
+        });
+        // array_product
+        self.functions.push(FunctionValue {
+            name: "array_product".into(),
+            params: vec![FnParam { name: "arr".into(), ty: None, by_ref: false, by_mut_ref: false }],
+            body: Box::new(Stmt::Block(vec![])),
+            closure_env: None,
+        });
+        // array_intersect
+        self.functions.push(FunctionValue {
+            name: "array_intersect".into(),
+            params: vec![
+                FnParam { name: "arr1".into(), ty: None, by_ref: false, by_mut_ref: false },
+                FnParam { name: "arr2".into(), ty: None, by_ref: false, by_mut_ref: false },
             ],
             body: Box::new(Stmt::Block(vec![])),
             closure_env: None,
@@ -2221,6 +2387,349 @@ impl Interpreter {
                     _ => Err("phprs_cors_is_preflight() expects a string".into()),
                 }
             }
+            // ---- String functions ----
+            "chr" => {
+                if args.len() != 1 { return Err("chr() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::Int(n) => match char::from_u32(*n as u32) {
+                        Some(c) => Ok(Value::String_(c.to_string())),
+                        None => Ok(Value::String_(String::new())),
+                    },
+                    _ => Err("chr() expects an int".into()),
+                }
+            }
+            "ord" => {
+                if args.len() != 1 { return Err("ord() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::String_(s) => {
+                        let code = s.chars().next().map(|c| c as i64).unwrap_or(0);
+                        Ok(Value::Int(code))
+                    }
+                    _ => Err("ord() expects a string".into()),
+                }
+            }
+            "addslashes" => {
+                if args.len() != 1 { return Err("addslashes() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::String_(s) => {
+                        let mut result = String::with_capacity(s.len());
+                        for c in s.chars() {
+                            match c {
+                                '\'' => result.push_str("\\'"),
+                                '"' => result.push_str("\\\""),
+                                '\\' => result.push_str("\\\\"),
+                                '\0' => result.push_str("\\0"),
+                                _ => result.push(c),
+                            }
+                        }
+                        Ok(Value::String_(result))
+                    }
+                    _ => Err("addslashes() expects a string".into()),
+                }
+            }
+            "stripslashes" => {
+                if args.len() != 1 { return Err("stripslashes() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::String_(s) => {
+                        let mut result = String::with_capacity(s.len());
+                        let mut chars = s.chars();
+                        while let Some(c) = chars.next() {
+                            if c == '\\' {
+                                match chars.next() {
+                                    Some('\'') => result.push('\''),
+                                    Some('"') => result.push('"'),
+                                    Some('\\') => result.push('\\'),
+                                    Some('0') => result.push('\0'),
+                                    Some(other) => { result.push('\\'); result.push(other); }
+                                    None => result.push('\\'),
+                                }
+                            } else {
+                                result.push(c);
+                            }
+                        }
+                        Ok(Value::String_(result))
+                    }
+                    _ => Err("stripslashes() expects a string".into()),
+                }
+            }
+            // ---- Filesystem functions ----
+            "copy" => {
+                if args.len() != 2 { return Err("copy() expects 2 arguments".into()); }
+                match (&args[0], &args[1]) {
+                    (Value::String_(src), Value::String_(dst)) => {
+                        match std::fs::copy(src, dst) {
+                            Ok(_) => Ok(Value::Bool(true)),
+                            Err(_) => Ok(Value::Bool(false)),
+                        }
+                    }
+                    _ => Err("copy() expects (string, string)".into()),
+                }
+            }
+            "rename" => {
+                if args.len() != 2 { return Err("rename() expects 2 arguments".into()); }
+                match (&args[0], &args[1]) {
+                    (Value::String_(old), Value::String_(new)) => {
+                        match std::fs::rename(old, new) {
+                            Ok(_) => Ok(Value::Bool(true)),
+                            Err(_) => Ok(Value::Bool(false)),
+                        }
+                    }
+                    _ => Err("rename() expects (string, string)".into()),
+                }
+            }
+            "filesize" => {
+                if args.len() != 1 { return Err("filesize() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::String_(path) => {
+                        match std::fs::metadata(path) {
+                            Ok(meta) => Ok(Value::Int(meta.len() as i64)),
+                            Err(_) => Ok(Value::Int(-1)),
+                        }
+                    }
+                    _ => Err("filesize() expects a string".into()),
+                }
+            }
+            "filemtime" => {
+                if args.len() != 1 { return Err("filemtime() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::String_(path) => {
+                        match std::fs::metadata(path) {
+                            Ok(meta) => {
+                                match meta.modified() {
+                                    Ok(time) => {
+                                        match time.duration_since(std::time::UNIX_EPOCH) {
+                                            Ok(d) => Ok(Value::Int(d.as_secs() as i64)),
+                                            Err(_) => Ok(Value::Int(-1)),
+                                        }
+                                    }
+                                    Err(_) => Ok(Value::Int(-1)),
+                                }
+                            }
+                            Err(_) => Ok(Value::Int(-1)),
+                        }
+                    }
+                    _ => Err("filemtime() expects a string".into()),
+                }
+            }
+            "pathinfo" => {
+                if args.len() != 1 { return Err("pathinfo() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::String_(path) => {
+                        let p = std::path::Path::new(path);
+                        let dirname = p.parent().and_then(|d| d.to_str()).unwrap_or("");
+                        let basename = p.file_name().and_then(|f| f.to_str()).unwrap_or("");
+                        let filename = if let Some(stem) = p.file_stem() {
+                            stem.to_str().unwrap_or("")
+                        } else { "" };
+                        let extension = p.extension().and_then(|e| e.to_str()).unwrap_or("");
+                        let json = format!(
+                            r#"{{"dirname":"{}","basename":"{}","extension":"{}","filename":"{}"}}"#,
+                            dirname, basename, extension, filename
+                        );
+                        Ok(Value::String_(json))
+                    }
+                    _ => Err("pathinfo() expects a string".into()),
+                }
+            }
+            "move_uploaded_file" => {
+                if args.len() != 2 { return Err("move_uploaded_file() expects 2 arguments".into()); }
+                match (&args[0], &args[1]) {
+                    (Value::String_(tmp), Value::String_(dest)) => {
+                        // Verify source exists before moving (basic safety check)
+                        if !std::path::Path::new(tmp).exists() {
+                            return Ok(Value::Bool(false));
+                        }
+                        match std::fs::rename(tmp, dest) {
+                            Ok(_) => Ok(Value::Bool(true)),
+                            Err(_) => Ok(Value::Bool(false)),
+                        }
+                    }
+                    _ => Err("move_uploaded_file() expects (string, string)".into()),
+                }
+            }
+            // ---- Security functions ----
+            "random_bytes" => {
+                if args.len() != 1 { return Err("random_bytes() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::Int(len) => {
+                        let n = (*len).max(1).min(1024 * 1024) as usize;
+                        let mut buf = vec![0u8; n];
+                        match std::fs::File::open("/dev/urandom") {
+                            Ok(mut f) => { let _ = f.read_exact(&mut buf); }
+                            Err(_) => {
+                                use std::time::{SystemTime, UNIX_EPOCH};
+                                let seed = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+                                for i in 0..n { buf[i] = ((seed >> ((i % 8) * 8)) & 0xFF) as u8; }
+                            }
+                        }
+                        let hex: String = buf.iter().map(|b| format!("{:02x}", b)).collect();
+                        Ok(Value::String_(hex))
+                    }
+                    _ => Err("random_bytes() expects an int".into()),
+                }
+            }
+            "random_int" => {
+                if args.len() != 2 { return Err("random_int() expects 2 arguments".into()); }
+                match (&args[0], &args[1]) {
+                    (Value::Int(min), Value::Int(max)) => {
+                        if min > max { return Err("random_int(): min must be <= max".into()); }
+                        let mut buf = [0u8; 8];
+                        match std::fs::File::open("/dev/urandom") {
+                            Ok(mut f) => { let _ = f.read_exact(&mut buf); }
+                            Err(_) => {
+                                use std::time::{SystemTime, UNIX_EPOCH};
+                                let seed = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() as u64;
+                                buf = seed.to_le_bytes();
+                            }
+                        }
+                        let val = u64::from_le_bytes(buf);
+                        let range = (*max - *min) as u64;
+                        let result = if range == 0 { *min } else { *min + (val % (range + 1)) as i64 };
+                        Ok(Value::Int(result))
+                    }
+                    _ => Err("random_int() expects (int, int)".into()),
+                }
+            }
+            "password_hash" => {
+                if args.len() != 2 { return Err("password_hash() expects 2 arguments".into()); }
+                match (&args[0], &args[1]) {
+                    (Value::String_(password), Value::String_(algo)) => {
+                        let mut salt_bytes = [0u8; 16];
+                        match std::fs::File::open("/dev/urandom") {
+                            Ok(mut f) => { let _ = f.read_exact(&mut salt_bytes); }
+                            Err(_) => {
+                                use std::time::{SystemTime, UNIX_EPOCH};
+                                let seed = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+                                for i in 0..16 { salt_bytes[i] = ((seed >> ((i % 8) * 8)) & 0xFF) as u8; }
+                            }
+                        }
+                        let salt_hex: String = salt_bytes.iter().map(|b| format!("{:02x}", b)).collect();
+                        let algo_str = if algo == "bcrypt" || algo == "sha256" || algo == "sha1" { algo.as_str() } else { "sha1" };
+                        let mut hasher = Sha1::new();
+                        hasher.update(format!("{}{}", salt_hex, password).as_bytes());
+                        let mut hash = hasher.finalize();
+                        for _ in 0..9999 {
+                            let mut h = Sha1::new();
+                            h.update(&hash[..]);
+                            h.update(password.as_bytes());
+                            hash = h.finalize();
+                        }
+                        let hash_hex = format!("{:x}", hash);
+                        Ok(Value::String_(format!("{}${}${}", algo_str, salt_hex, hash_hex)))
+                    }
+                    _ => Err("password_hash() expects (string, string)".into()),
+                }
+            }
+            "password_verify" => {
+                if args.len() != 2 { return Err("password_verify() expects 2 arguments".into()); }
+                match (&args[0], &args[1]) {
+                    (Value::String_(password), Value::String_(stored_hash)) => {
+                        let parts: Vec<&str> = stored_hash.split('$').collect();
+                        if parts.len() != 3 { return Ok(Value::Bool(false)); }
+                        let salt_hex = parts[1];
+                        let mut hasher = Sha1::new();
+                        hasher.update(format!("{}{}", salt_hex, password).as_bytes());
+                        let mut hash = hasher.finalize();
+                        for _ in 0..9999 {
+                            let mut h = Sha1::new();
+                            h.update(&hash[..]);
+                            h.update(password.as_bytes());
+                            hash = h.finalize();
+                        }
+                        let computed_hex = format!("{:x}", hash);
+                        Ok(Value::Bool(computed_hex == parts[2]))
+                    }
+                    _ => Err("password_verify() expects (string, string)".into()),
+                }
+            }
+            // ---- Array functions ----
+            "array_chunk" => {
+                if args.len() < 2 || args.len() > 3 { return Err("array_chunk() expects 2 or 3 arguments".into()); }
+                let preserve_keys = if args.len() >= 3 { matches!(&args[2], Value::Bool(true)) } else { false };
+                match (&args[0], &args[1]) {
+                    (Value::Array(arr), Value::Int(size)) => {
+                        let chunk_size = (*size).max(1) as usize;
+                        let mut result = Vec::new();
+                        let len = arr.len();
+                        let mut i = 0;
+                        while i < len {
+                            let end = (i + chunk_size).min(len);
+                            if preserve_keys {
+                                // Create dict-like chunk with numeric keys preserved
+                                let mut chunk = Vec::new();
+                                for j in i..end {
+                                    chunk.push(arr[j].clone());
+                                }
+                                result.push(Value::Array(chunk));
+                            } else {
+                                let chunk: Vec<Value> = arr[i..end].to_vec();
+                                result.push(Value::Array(chunk));
+                            }
+                            i = end;
+                        }
+                        Ok(Value::Array(result))
+                    }
+                    _ => Err("array_chunk() expects (array, int)".into()),
+                }
+            }
+            "array_count_values" => {
+                if args.len() != 1 { return Err("array_count_values() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::Array(arr) => {
+                        let mut counts: HashMap<String, Value> = HashMap::new();
+                        for val in arr {
+                            let key = match val {
+                                Value::String_(s) => s.clone(),
+                                Value::Int(n) => n.to_string(),
+                                _ => continue,
+                            };
+                            let count = counts.entry(key).or_insert(Value::Int(0));
+                            if let Value::Int(n) = count { *n += 1; }
+                        }
+                        Ok(Value::Dict(counts))
+                    }
+                    _ => Err("array_count_values() expects an array".into()),
+                }
+            }
+            "array_product" => {
+                if args.len() != 1 { return Err("array_product() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::Array(arr) => {
+                        if arr.is_empty() { return Ok(Value::Int(1)); }
+                        let mut has_float = false;
+                        let mut product = 1.0f64;
+                        for val in arr {
+                            match val {
+                                Value::Int(n) => product *= *n as f64,
+                                Value::Float(f) => { product *= f; has_float = true; }
+                                _ => {} // skip non-numeric
+                            }
+                        }
+                        if has_float {
+                            Ok(Value::Float(product))
+                        } else {
+                            Ok(Value::Int(product as i64))
+                        }
+                    }
+                    _ => Err("array_product() expects an array".into()),
+                }
+            }
+            "array_intersect" => {
+                if args.len() != 2 { return Err("array_intersect() expects 2 arguments".into()); }
+                match (&args[0], &args[1]) {
+                    (Value::Array(arr1), Value::Array(arr2)) => {
+                        let mut result = Vec::new();
+                        let set2: std::collections::HashSet<String> = arr2.iter().map(value_to_key).collect();
+                        for val in arr1 {
+                            if set2.contains(&value_to_key(val)) {
+                                result.push(val.clone());
+                            }
+                        }
+                        Ok(Value::Array(result))
+                    }
+                    _ => Err("array_intersect() expects (array, array)".into()),
+                }
+            }
             _ => Err(format!("Unknown builtin function: {}", name)),
         }
     }
@@ -3312,6 +3821,14 @@ impl Interpreter {
             | "phprs_cors_is_preflight"
             // curl HTTP client
             | "curl" | "curl_async" | "curl_wait" | "curl_is_done"
+            // String functions
+            | "chr" | "ord" | "addslashes" | "stripslashes"
+            // Filesystem functions
+            | "copy" | "rename" | "filesize" | "filemtime" | "pathinfo" | "move_uploaded_file"
+            // Security functions
+            | "password_hash" | "password_verify" | "random_bytes" | "random_int"
+            // Array functions
+            | "array_chunk" | "array_count_values" | "array_product" | "array_intersect"
         )
     }
 

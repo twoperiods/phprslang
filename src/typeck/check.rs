@@ -19,6 +19,24 @@ impl TypeEnv {
         env.funcs.insert("count".into(), (vec![Ty::Array(Box::new(Ty::Unknown))], Ty::Int));
         env.funcs.insert("trim".into(), (vec![Ty::String], Ty::String));
         env.funcs.insert("str_contains".into(), (vec![Ty::String, Ty::String], Ty::Bool));
+        env.funcs.insert("chr".into(), (vec![Ty::Int], Ty::String));
+        env.funcs.insert("ord".into(), (vec![Ty::String], Ty::Int));
+        env.funcs.insert("addslashes".into(), (vec![Ty::String], Ty::String));
+        env.funcs.insert("stripslashes".into(), (vec![Ty::String], Ty::String));
+        env.funcs.insert("copy".into(), (vec![Ty::String, Ty::String], Ty::Bool));
+        env.funcs.insert("rename".into(), (vec![Ty::String, Ty::String], Ty::Bool));
+        env.funcs.insert("filesize".into(), (vec![Ty::String], Ty::Int));
+        env.funcs.insert("filemtime".into(), (vec![Ty::String], Ty::Int));
+        env.funcs.insert("pathinfo".into(), (vec![Ty::String], Ty::String));
+        env.funcs.insert("move_uploaded_file".into(), (vec![Ty::String, Ty::String], Ty::Bool));
+        env.funcs.insert("password_hash".into(), (vec![Ty::String, Ty::String], Ty::String));
+        env.funcs.insert("password_verify".into(), (vec![Ty::String, Ty::String], Ty::Bool));
+        env.funcs.insert("random_bytes".into(), (vec![Ty::Int], Ty::String));
+        env.funcs.insert("random_int".into(), (vec![Ty::Int, Ty::Int], Ty::Int));
+        env.funcs.insert("array_chunk".into(), (vec![Ty::Array(Box::new(Ty::Unknown)), Ty::Int, Ty::Bool], Ty::Array(Box::new(Ty::Unknown))));
+        env.funcs.insert("array_count_values".into(), (vec![Ty::Array(Box::new(Ty::Unknown))], Ty::Dict(Box::new(Ty::String), Box::new(Ty::Int))));
+        env.funcs.insert("array_product".into(), (vec![Ty::Array(Box::new(Ty::Unknown))], Ty::Float));
+        env.funcs.insert("array_intersect".into(), (vec![Ty::Array(Box::new(Ty::Unknown)), Ty::Array(Box::new(Ty::Unknown))], Ty::Array(Box::new(Ty::Unknown))));
         env
     }
 

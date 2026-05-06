@@ -164,6 +164,24 @@ impl CTranspiler {
             ("realpath", "const char*"),
             ("is_file", "int64_t"),
             ("getcwd", "const char*"),
+            ("chr", "const char*"),
+            ("ord", "int64_t"),
+            ("addslashes", "const char*"),
+            ("stripslashes", "const char*"),
+            ("copy", "bool"),
+            ("rename", "bool"),
+            ("filesize", "int64_t"),
+            ("filemtime", "int64_t"),
+            ("pathinfo", "const char*"),
+            ("move_uploaded_file", "bool"),
+            ("password_hash", "const char*"),
+            ("password_verify", "bool"),
+            ("random_bytes", "const char*"),
+            ("random_int", "int64_t"),
+            ("array_chunk", "const char*"),
+            ("array_count_values", "const char*"),
+            ("array_product", "double"),
+            ("array_intersect", "const char*"),
         ];
         for (name, ret) in builtins {
             if !self.func_return_types.contains_key(name) {
@@ -803,6 +821,7 @@ impl CTranspiler {
                         "basename" => self.write("basename_"),
                         "dirname" => self.write("dirname_"),
                         "scandir" => self.write("scandir_"),
+                        "rename" => self.write("rename_"),
                         _ => self.write(name),
                     }
                 } else {
@@ -1040,6 +1059,7 @@ impl CTranspiler {
                         "basename" => self.write("basename_"),
                         "dirname" => self.write("dirname_"),
                         "scandir" => self.write("scandir_"),
+                        "rename" => self.write("rename_"),
                         _ => self.write(name),
                     }
                     self.write("(");

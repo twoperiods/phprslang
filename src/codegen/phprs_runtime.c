@@ -3677,6 +3677,340 @@ int64_t curl_is_done(int64_t handle) {
     return phprs_curl_is_done(handle);
 }
 
+// ---- String helpers ----
+
+const char* chr(int64_t codepoint) {
+    if (codepoint < 0 || codepoint > 0x10FFFF) return strdup("");
+    char* r = malloc(5);
+    if (!r) return strdup("");
+    if (codepoint < 0x80) {
+        r[0] = (char)codepoint; r[1] = '\0';
+    } else if (codepoint < 0x800) {
+        r[0] = (char)(0xC0 | (codepoint >> 6));
+        r[1] = (char)(0x80 | (codepoint & 0x3F));
+        r[2] = '\0';
+    } else if (codepoint < 0x10000) {
+        r[0] = (char)(0xE0 | (codepoint >> 12));
+        r[1] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
+        r[2] = (char)(0x80 | (codepoint & 0x3F));
+        r[3] = '\0';
+    } else {
+        r[0] = (char)(0xF0 | (codepoint >> 18));
+        r[1] = (char)(0x80 | ((codepoint >> 12) & 0x3F));
+        r[2] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
+        r[3] = (char)(0x80 | (codepoint & 0x3F));
+        r[4] = '\0';
+    }
+    return r;
+}
+
+int64_t ord(const char* s) {
+    if (!s || !*s) return 0;
+    return (int64_t)(unsigned char)s[0];
+}
+
+const char* addslashes(const char* s) {
+    if (!s) return strdup("");
+    size_t len = strlen(s);
+    // Count how many chars need escaping
+    size_t extra = 0;
+    for (size_t i = 0; i < len; i++) {
+        if (s[i] == '\'' || s[i] == '"' || s[i] == '\\' || s[i] == '\0') extra++;
+    }
+    char* r = malloc(len + extra + 1);
+    if (!r) return strdup("");
+    size_t j = 0;
+    for (size_t i = 0; i < len; i++) {
+        switch (s[i]) {
+            case '\'': r[j++] = '\\'; r[j++] = '\''; break;
+            case '"':  r[j++] = '\\'; r[j++] = '"'; break;
+            case '\\': r[j++] = '\\'; r[j++] = '\\'; break;
+            case '\0': r[j++] = '\\'; r[j++] = '0'; break;
+            default:   r[j++] = s[i]; break;
+        }
+    }
+    r[j] = '\0';
+    return r;
+}
+
+const char* stripslashes(const char* s) {
+    if (!s) return strdup("");
+    size_t len = strlen(s);
+    char* r = malloc(len + 1);
+    if (!r) return strdup("");
+    size_t j = 0;
+    for (size_t i = 0; i < len; i++) {
+        if (s[i] == '\\' && i + 1 < len) {
+            i++;
+            switch (s[i]) {
+                case '\'': r[j++] = '\''; break;
+                case '"':  r[j++] = '"'; break;
+                case '\\': r[j++] = '\\'; break;
+                case '0':  r[j++] = '\0'; break;
+                default:   r[j++] = '\\'; r[j++] = s[i]; break;
+            }
+        } else {
+            r[j++] = s[i];
+        }
+    }
+    r[j] = '\0';
+    return r;
+}
+
+// ---- Filesystem functions ----
+
+bool copy(const char* source, const char* dest) {
+    if (!source || !dest) return false;
+    FILE* fsrc = fopen(source, "rb");
+    if (!fsrc) return false;
+    FILE* fdst = fopen(dest, "wb");
+    if (!fdst) { fclose(fsrc); return false; }
+    char buf[8192];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), fsrc)) > 0) {
+        if (fwrite(buf, 1, n, fdst) != n) {
+            fclose(fsrc); fclose(fdst);
+            return false;
+        }
+    }
+    fclose(fsrc); fclose(fdst);
+    return true;
+}
+
+bool rename_(const char* old_path, const char* new_path) {
+    if (!old_path || !new_path) return false;
+    return rename(old_path, new_path) == 0;
+}
+
+int64_t filesize(const char* path) {
+    if (!path) return -1;
+    struct stat st;
+    if (stat(path, &st) != 0) return -1;
+    if (!S_ISREG(st.st_mode)) return -1;
+    return (int64_t)st.st_size;
+}
+
+int64_t filemtime(const char* path) {
+    if (!path) return -1;
+    struct stat st;
+    if (stat(path, &st) != 0) return -1;
+    return (int64_t)st.st_mtime;
+}
+
+const char* pathinfo(const char* path) {
+    if (!path) return strdup("{\"dirname\":\"\",\"basename\":\"\",\"extension\":\"\",\"filename\":\"\"}");
+    char dirname[1024] = "";
+    char basename[256] = "";
+    char filename[256] = "";
+    char extension[64] = "";
+
+    // Find last separator for dirname
+    const char* sep = strrchr(path, '/');
+    const char* sep2 = strrchr(path, '\\');
+    if (sep2 && (!sep || sep2 > sep)) sep = sep2;
+
+    if (sep) {
+        size_t dlen = sep - path;
+        if (dlen >= sizeof(dirname)) dlen = sizeof(dirname) - 1;
+        memcpy(dirname, path, dlen);
+        dirname[dlen] = '\0';
+        strncpy(basename, sep + 1, sizeof(basename) - 1);
+        basename[sizeof(basename) - 1] = '\0';
+    } else {
+        dirname[0] = '\0';
+        strncpy(basename, path, sizeof(basename) - 1);
+        basename[sizeof(basename) - 1] = '\0';
+    }
+
+    // Extension: find last '.'
+    const char* dot = strrchr(basename, '.');
+    if (dot && dot != basename) {
+        size_t flen = dot - basename;
+        if (flen >= sizeof(filename)) flen = sizeof(filename) - 1;
+        memcpy(filename, basename, flen);
+        filename[flen] = '\0';
+        strncpy(extension, dot + 1, sizeof(extension) - 1);
+        extension[sizeof(extension) - 1] = '\0';
+    } else {
+        strncpy(filename, basename, sizeof(filename) - 1);
+        filename[sizeof(filename) - 1] = '\0';
+        extension[0] = '\0';
+    }
+
+    char* result = malloc(2048);
+    if (!result) return strdup("{}");
+    snprintf(result, 2048,
+        "{\"dirname\":\"%s\",\"basename\":\"%s\",\"extension\":\"%s\",\"filename\":\"%s\"}",
+        dirname, basename, extension, filename);
+    return result;
+}
+
+bool move_uploaded_file(const char* tmp, const char* dest) {
+    if (!tmp || !dest) return false;
+    // Basic safety: check source exists
+    struct stat st;
+    if (stat(tmp, &st) != 0) return false;
+    return rename(tmp, dest) == 0;
+}
+
+// ---- Security functions ----
+
+const char* random_bytes(int64_t length) {
+    if (length < 1) length = 1;
+    if (length > 1024 * 1024) length = 1024 * 1024;
+    size_t n = (size_t)length;
+    unsigned char* buf = malloc(n);
+    if (!buf) return strdup("");
+    FILE* f = fopen("/dev/urandom", "rb");
+    if (f) {
+        size_t rd = fread(buf, 1, n, f);
+        fclose(f);
+        if (rd < n) {
+            // fallback on partial read
+            for (size_t i = rd; i < n; i++) buf[i] = (unsigned char)(time(NULL) ^ i);
+        }
+    } else {
+        // fallback
+        int64_t t = (int64_t)time(NULL);
+        for (size_t i = 0; i < n; i++) buf[i] = (unsigned char)((t >> ((i % 8) * 8)) & 0xFF);
+    }
+    char* hex = malloc(n * 2 + 1);
+    if (!hex) { free(buf); return strdup(""); }
+    for (size_t i = 0; i < n; i++) {
+        snprintf(hex + i * 2, 3, "%02x", buf[i]);
+    }
+    hex[n * 2] = '\0';
+    free(buf);
+    return hex;
+}
+
+int64_t random_int(int64_t min, int64_t max) {
+    if (min > max) return min;
+    uint64_t val = 0;
+    FILE* f = fopen("/dev/urandom", "rb");
+    if (f) {
+        size_t rd = fread(&val, 1, sizeof(val), f);
+        fclose(f);
+        if (rd < sizeof(val)) val = (uint64_t)time(NULL);
+    } else {
+        val = (uint64_t)time(NULL);
+    }
+    uint64_t range = (uint64_t)(max - min);
+    if (range == 0) return min;
+    return min + (int64_t)(val % (range + 1));
+}
+
+// Forward declare the internal SHA-1 raw function (defined later in this file)
+static void phprs_sha1(const unsigned char* input, size_t len, unsigned char output[20]);
+
+const char* password_hash(const char* password, const char* algo) {
+    if (!password) password = "";
+    size_t pwlen = strlen(password);
+
+    // Generate 16-byte random salt
+    unsigned char salt_bytes[16];
+    FILE* f = fopen("/dev/urandom", "rb");
+    if (f) {
+        size_t rd = fread(salt_bytes, 1, 16, f);
+        fclose(f);
+        if (rd < 16) {
+            int64_t t = (int64_t)time(NULL);
+            for (int i = (int)rd; i < 16; i++) salt_bytes[i] = (unsigned char)((t >> ((i % 8) * 8)) & 0xFF);
+        }
+    } else {
+        int64_t t = (int64_t)time(NULL);
+        for (int i = 0; i < 16; i++) salt_bytes[i] = (unsigned char)((t >> ((i % 8) * 8)) & 0xFF);
+    }
+    char salt_hex[33];
+    for (int i = 0; i < 16; i++) snprintf(salt_hex + i * 2, 3, "%02x", salt_bytes[i]);
+    salt_hex[32] = '\0';
+
+    // Determine algorithm string
+    const char* algo_str = algo;
+    if (!algo_str || algo_str[0] == '\0') algo_str = "sha1";
+    if (strcmp(algo_str, "bcrypt") != 0 && strcmp(algo_str, "sha256") != 0 && strcmp(algo_str, "sha1") != 0) {
+        algo_str = "sha1";
+    }
+
+    // Repeated SHA-1: 10000 iterations
+    // First: hash = SHA1(salt_hex + password)
+    size_t initial_len = 32 + pwlen;
+    unsigned char* initial = malloc(initial_len);
+    if (!initial) return strdup("");
+    memcpy(initial, salt_hex, 32);
+    memcpy(initial + 32, password, pwlen);
+    unsigned char hash[20];
+    phprs_sha1(initial, initial_len, hash);
+    free(initial);
+
+    for (int iter = 0; iter < 9999; iter++) {
+        unsigned char combined[20 + 1024]; // hash + password
+        memcpy(combined, hash, 20);
+        size_t pw_copy = pwlen;
+        if (pw_copy > 1024) pw_copy = 1024;
+        memcpy(combined + 20, password, pw_copy);
+        phprs_sha1(combined, 20 + pw_copy, hash);
+    }
+    char hash_hex[41];
+    for (int i = 0; i < 20; i++) snprintf(hash_hex + i * 2, 3, "%02x", hash[i]);
+    hash_hex[40] = '\0';
+
+    char* result = malloc(strlen(algo_str) + 1 + 32 + 1 + 40 + 1);
+    if (!result) return strdup("");
+    snprintf(result, 1024, "%s$%s$%s", algo_str, salt_hex, hash_hex);
+    return result;
+}
+
+bool password_verify(const char* password, const char* stored_hash) {
+    if (!password || !stored_hash) return false;
+
+    // Parse: algo$salt$hash
+    const char* dollar1 = strchr(stored_hash, '$');
+    if (!dollar1) return false;
+    const char* dollar2 = strchr(dollar1 + 1, '$');
+    if (!dollar2) return false;
+
+    size_t salt_len = dollar2 - dollar1 - 1;
+    if (salt_len > 64) return false;
+    char salt_hex[65];
+    memcpy(salt_hex, dollar1 + 1, salt_len);
+    salt_hex[salt_len] = '\0';
+
+    const char* expected_hex = dollar2 + 1;
+    size_t pwlen = strlen(password);
+
+    // Recompute hash
+    size_t initial_len = salt_len + pwlen;
+    unsigned char* initial = malloc(initial_len);
+    if (!initial) return false;
+    memcpy(initial, salt_hex, salt_len);
+    memcpy(initial + salt_len, password, pwlen);
+    unsigned char hash[20];
+    phprs_sha1(initial, initial_len, hash);
+    free(initial);
+
+    for (int iter = 0; iter < 9999; iter++) {
+        unsigned char combined[20 + 1024];
+        memcpy(combined, hash, 20);
+        size_t pw_copy = pwlen;
+        if (pw_copy > 1024) pw_copy = 1024;
+        memcpy(combined + 20, password, pw_copy);
+        phprs_sha1(combined, 20 + pw_copy, hash);
+    }
+    char computed_hex[41];
+    for (int i = 0; i < 20; i++) snprintf(computed_hex + i * 2, 3, "%02x", hash[i]);
+    computed_hex[40] = '\0';
+
+    // Constant-time comparison
+    size_t explen = strlen(expected_hex);
+    if (explen != 40) return false;
+    int diff = 0;
+    for (size_t i = 0; i < 40; i++) {
+        diff |= (computed_hex[i] ^ expected_hex[i]);
+    }
+    return diff == 0;
+}
+
 // ---- Rate Limiting ----
 
 #define RATE_LIMIT_SLOTS 256

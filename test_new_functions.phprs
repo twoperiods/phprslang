@@ -1,0 +1,100 @@
+<?phprs
+// Test all newly added built-in functions
+
+// ---- Batch 1: String Functions ----
+echo "=== String Functions ===\n";
+
+let $ch = chr(65);
+echo "chr(65) = " . $ch . " (expected: A)\n";
+
+let $ch2 = chr(20013);
+echo "chr(20013) = " . $ch2 . " (expected: special char)\n";
+
+let $or = ord("ABC");
+echo "ord('ABC') = " . $or . " (expected: 65)\n";
+
+let $or2 = ord("中");
+echo "ord('中') > 127\n";
+
+let $esc = addslashes("hello 'world'");
+echo "addslashes = " . $esc . "\n";
+
+let $unesc = stripslashes($esc);
+echo "stripslashes roundtrip = " . $unesc . "\n";
+
+// ---- Batch 2: Filesystem Functions ----
+echo "\n=== Filesystem Functions ===\n";
+
+let $path = "test_new_functions.phprs";
+let $size = filesize($path);
+echo "filesize = " . $size . " (expected: > 0)\n";
+
+let $mtime = filemtime($path);
+echo "filemtime = " . $mtime . " (expected: > 0)\n";
+
+let $info = pathinfo("/var/www/index.html");
+echo "pathinfo = " . $info . "\n";
+
+let $copy_result = copy("test_new_functions.phprs", "/tmp/phprs_test_copy.txt");
+if ($copy_result == true) {
+    echo "copy test = PASS\n";
+    let $ren_result = rename("/tmp/phprs_test_copy.txt", "/tmp/phprs_test_renamed.txt");
+    if ($ren_result == true) {
+        echo "rename test = PASS\n";
+        unlink("/tmp/phprs_test_renamed.txt");
+    } else {
+        echo "rename test = FAIL\n";
+    }
+} else {
+    echo "copy test = FAIL\n";
+}
+
+// ---- Batch 3: Security Functions ----
+echo "\n=== Security Functions ===\n";
+
+let $rand_hex = random_bytes(16);
+echo "random_bytes(16) length = " . strlen($rand_hex) . " (expected: 32)\n";
+
+let $rand_int = random_int(1, 100);
+echo "random_int(1, 100) = " . $rand_int . " (expected: 1-100)\n";
+
+let $pw = "my_secret_password";
+let $hash = password_hash($pw, "sha1");
+echo "password_hash format = " . $hash . "\n";
+
+let $verify = password_verify($pw, $hash);
+if ($verify == true) {
+    echo "password_verify correct = PASS\n";
+} else {
+    echo "password_verify correct = FAIL\n";
+}
+
+let $verify_wrong = password_verify("wrong_password", $hash);
+if ($verify_wrong == true) {
+    echo "password_verify wrong = FAIL (should be false)\n";
+} else {
+    echo "password_verify wrong = PASS (correctly false)\n";
+}
+
+// ---- Batch 4: Array Functions ----
+echo "\n=== Array Functions ===\n";
+
+let $arr = [1, 2, 3, 4, 5, 6, 7];
+let $chunks = array_chunk($arr, 2, false);
+echo "array_chunk([1..7], 2) count = " . count($chunks) . " (expected: 4)\n";
+
+let $arr2 = ["a", "b", "a", "c", "b", "a"];
+let $counts = array_count_values($arr2);
+echo "array_count_values = " . json_encode($counts) . "\n";
+
+let $nums = [2, 3, 4];
+let $product = array_product($nums);
+echo "array_product([2,3,4]) = " . $product . " (expected: 24)\n";
+
+let $a1 = [1, 2, 3, 4, 5];
+let $a2 = [3, 4, 5, 6, 7];
+let $inter = array_intersect($a1, $a2);
+echo "array_intersect count = " . count($inter) . " (expected: 3)\n";
+
+echo "\n=== All Tests Complete ===\n";
+?>
