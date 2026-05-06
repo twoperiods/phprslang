@@ -22,6 +22,8 @@ function router_is_int(string $s): int {
         $work = phprs_str_replace($work, "-", "");
     }
     if ($work == "") { return 0; }
+    // Reject overflow: more than 10 digits cannot fit in a 32-bit int
+    if (strlen($work) > 10) { return 0; }
     // Remove all digit characters; if anything remains, it's not an int
     $work = phprs_str_replace($work, "0", "");
     $work = phprs_str_replace($work, "1", "");

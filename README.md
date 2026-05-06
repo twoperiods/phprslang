@@ -66,12 +66,13 @@ echo json_encode(["status" => "ok", "data" => $items]);
 
 ### Built-in Functions
 
-Over 120 built-in functions covering:
+Over 140 built-in functions covering:
 
 | Category | Functions |
 |---|---|
-| **String** | `strlen`, `substr`, `strpos`, `stripos`, `strrpos`, `explode`, `implode`, `sprintf`, `trim`, `ltrim`, `rtrim`, `str_replace`, `strtolower`, `strtoupper`, `ucfirst`, `htmlspecialchars`, `nl2br`, `strip_tags`, `str_repeat`, `number_format`, `chr`, `ord`, `addslashes`, `stripslashes`, `phprs_str_contains`, `phprs_str_starts_with`, `phprs_str_ends_with`, `phprs_str_split` |
-| **Array** | `array_push`, `array_pop`, `array_shift`, `array_unshift`, `array_keys`, `array_values`, `array_merge`, `array_flip`, `array_slice`, `array_sum`, `array_unique`, `array_reverse`, `array_filter`, `array_map`, `array_reduce`, `array_diff`, `array_combine`, `array_column`, `array_fill`, `array_rand`, `array_chunk`, `array_count_values`, `array_product`, `array_intersect`, `in_array`, `array_search`, `array_key_exists`, `range`, `sort`, `rsort` |
+| **String** | `strlen`, `substr`, `strpos`, `stripos`, `strrpos`, `explode`, `implode`, `sprintf`, `printf`, `trim`, `ltrim`, `rtrim`, `str_replace`, `strtolower`, `strtoupper`, `ucfirst`, `htmlspecialchars`, `nl2br`, `strip_tags`, `str_repeat`, `number_format`, `chr`, `ord`, `addslashes`, `stripslashes`, `str_pad`, `wordwrap`, `str_word_count`, `chunk_split`, `str_starts_with`, `str_ends_with`, `phprs_str_contains`, `phprs_str_starts_with`, `phprs_str_ends_with`, `phprs_str_split` |
+| **Array** | `array_push`, `array_pop`, `array_shift`, `array_unshift`, `array_keys`, `array_values`, `array_merge`, `array_flip`, `array_slice`, `array_splice`, `array_sum`, `array_unique`, `array_reverse`, `array_filter`, `array_map`, `array_reduce`, `array_diff`, `array_combine`, `array_column`, `array_fill`, `array_rand`, `array_chunk`, `array_count_values`, `array_product`, `array_intersect`, `array_pad`, `array_key_first`, `array_key_last`, `array_is_list`, `in_array`, `array_search`, `array_key_exists`, `range`, `sort`, `rsort` |
+| **Type** | `is_null`, `is_int`, `is_float`, `is_string`, `is_bool`, `is_array`, `empty`, `isset`, `unset`, `gettype`, `intval`, `floatval`, `strval`, `boolval` |
 | **File I/O** | `file_get_contents`, `file_put_contents`, `file_exists`, `is_dir`, `is_file`, `mkdir`, `unlink`, `basename`, `dirname`, `scandir`, `copy`, `rename`, `filesize`, `filemtime`, `pathinfo`, `move_uploaded_file`, `realpath`, `getcwd` |
 | **JSON** | `json_encode`, `json_decode`, `phprs_json_get_string`, `phprs_json_get_int` |
 | **URL/Encoding** | `urlencode`, `urldecode`, `parse_url`, `http_build_query`, `base64_encode`, `base64_decode` |
@@ -79,10 +80,9 @@ Over 120 built-in functions covering:
 | **HTTP Client** | `phprs_dns_resolve`, `phprs_tcp_connect`, `phprs_tls_connect`, `phprs_socket_read_all`, `phprs_http_build_request`, `phprs_http_response_status`, `phprs_http_response_body` |
 | **Net** | `phprs_server_new`, `phprs_server_accept`, `phprs_socket_read`, `phprs_socket_write`, `phprs_socket_close` |
 | **WebSocket** | `phprs_is_websocket_upgrade`, `phprs_ws_handshake_response`, `phprs_ws_read_frame`, `phprs_ws_write_frame`, `phprs_ws_send_pong`, `phprs_ws_close` |
-| **Type** | `is_null`, `is_int`, `is_float`, `is_string`, `is_bool`, `is_array`, `empty`, `isset`, `unset`, `gettype` |
 | **Hash/Security** | `md5`, `sha1`, `uniqid`, `password_hash`, `password_verify`, `random_bytes`, `random_int` |
-| **Math** | `abs`, `ceil`, `floor`, `round`, `max`, `min`, `rand`, `mt_rand`, `pow`, `sqrt` |
-| **Date** | `time`, `date`, `strtotime`, `microtime` |
+| **Math** | `abs`, `ceil`, `floor`, `round`, `max`, `min`, `rand`, `mt_rand`, `pow`, `sqrt`, `fmod`, `intdiv` |
+| **Date** | `time`, `date`, `strtotime`, `microtime`, `mktime`, `checkdate` |
 | **Threading** | `phprs_thread_spawn`, `phprs_thread_pool_init`, `phprs_thread_pool_enqueue`, `phprs_thread_pool_shutdown`, `phprs_mutex_new`, `phprs_mutex_lock`, `phprs_mutex_unlock` |
 | **Middleware** | `phprs_rate_limit_init`, `phprs_rate_limit_check`, `phprs_cors_set_config`, `phprs_cors_get_origin`, `phprs_cors_get_methods`, `phprs_cors_get_headers`, `phprs_cors_is_preflight` |
 | **System** | `sleep`, `usleep` |

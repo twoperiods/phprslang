@@ -37,6 +37,31 @@ impl TypeEnv {
         env.funcs.insert("array_count_values".into(), (vec![Ty::Array(Box::new(Ty::Unknown))], Ty::Dict(Box::new(Ty::String), Box::new(Ty::Int))));
         env.funcs.insert("array_product".into(), (vec![Ty::Array(Box::new(Ty::Unknown))], Ty::Float));
         env.funcs.insert("array_intersect".into(), (vec![Ty::Array(Box::new(Ty::Unknown)), Ty::Array(Box::new(Ty::Unknown))], Ty::Array(Box::new(Ty::Unknown))));
+        // Batch 2: Type casting
+        env.funcs.insert("intval".into(), (vec![Ty::Unknown], Ty::Int));
+        env.funcs.insert("floatval".into(), (vec![Ty::Unknown], Ty::Float));
+        env.funcs.insert("strval".into(), (vec![Ty::Unknown], Ty::String));
+        env.funcs.insert("boolval".into(), (vec![Ty::Unknown], Ty::Bool));
+        // Batch 2: String functions
+        env.funcs.insert("str_pad".into(), (vec![Ty::String, Ty::Int], Ty::String));
+        env.funcs.insert("wordwrap".into(), (vec![Ty::String], Ty::String));
+        env.funcs.insert("str_word_count".into(), (vec![Ty::String], Ty::Int));
+        env.funcs.insert("chunk_split".into(), (vec![Ty::String], Ty::String));
+        // Batch 2: Array functions
+        env.funcs.insert("array_splice".into(), (vec![Ty::Array(Box::new(Ty::Unknown)), Ty::Int, Ty::Int], Ty::Array(Box::new(Ty::Unknown))));
+        env.funcs.insert("array_pad".into(), (vec![Ty::Array(Box::new(Ty::Unknown)), Ty::Int, Ty::Unknown], Ty::Array(Box::new(Ty::Unknown))));
+        env.funcs.insert("array_key_first".into(), (vec![Ty::Array(Box::new(Ty::Unknown))], Ty::Unknown));
+        env.funcs.insert("array_key_last".into(), (vec![Ty::Array(Box::new(Ty::Unknown))], Ty::Unknown));
+        env.funcs.insert("array_is_list".into(), (vec![Ty::Array(Box::new(Ty::Unknown))], Ty::Bool));
+        // Batch 2: Math/Date
+        env.funcs.insert("fmod".into(), (vec![Ty::Float, Ty::Float], Ty::Float));
+        env.funcs.insert("intdiv".into(), (vec![Ty::Int, Ty::Int], Ty::Int));
+        env.funcs.insert("checkdate".into(), (vec![Ty::Int, Ty::Int, Ty::Int], Ty::Bool));
+        env.funcs.insert("mktime".into(), (vec![Ty::Int, Ty::Int, Ty::Int, Ty::Int, Ty::Int, Ty::Int], Ty::Int));
+        // Batch 2: Misc
+        env.funcs.insert("printf".into(), (vec![Ty::String], Ty::Void));
+        env.funcs.insert("str_starts_with".into(), (vec![Ty::String, Ty::String], Ty::Bool));
+        env.funcs.insert("str_ends_with".into(), (vec![Ty::String, Ty::String], Ty::Bool));
         env
     }
 

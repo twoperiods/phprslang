@@ -311,6 +311,187 @@ impl Interpreter {
             body: Box::new(Stmt::Block(vec![])),
             closure_env: None,
         });
+        // intval
+        self.functions.push(FunctionValue {
+            name: "intval".into(),
+            params: vec![FnParam { name: "val".into(), ty: None, by_ref: false, by_mut_ref: false }],
+            body: Box::new(Stmt::Block(vec![])),
+            closure_env: None,
+        });
+        // floatval
+        self.functions.push(FunctionValue {
+            name: "floatval".into(),
+            params: vec![FnParam { name: "val".into(), ty: None, by_ref: false, by_mut_ref: false }],
+            body: Box::new(Stmt::Block(vec![])),
+            closure_env: None,
+        });
+        // strval
+        self.functions.push(FunctionValue {
+            name: "strval".into(),
+            params: vec![FnParam { name: "val".into(), ty: None, by_ref: false, by_mut_ref: false }],
+            body: Box::new(Stmt::Block(vec![])),
+            closure_env: None,
+        });
+        // boolval
+        self.functions.push(FunctionValue {
+            name: "boolval".into(),
+            params: vec![FnParam { name: "val".into(), ty: None, by_ref: false, by_mut_ref: false }],
+            body: Box::new(Stmt::Block(vec![])),
+            closure_env: None,
+        });
+        // str_pad
+        self.functions.push(FunctionValue {
+            name: "str_pad".into(),
+            params: vec![
+                FnParam { name: "input".into(), ty: Some(TypeAnnotation::String_), by_ref: false, by_mut_ref: false },
+                FnParam { name: "length".into(), ty: Some(TypeAnnotation::Int), by_ref: false, by_mut_ref: false },
+            ],
+            body: Box::new(Stmt::Block(vec![])),
+            closure_env: None,
+        });
+        // wordwrap
+        self.functions.push(FunctionValue {
+            name: "wordwrap".into(),
+            params: vec![FnParam { name: "str".into(), ty: Some(TypeAnnotation::String_), by_ref: false, by_mut_ref: false }],
+            body: Box::new(Stmt::Block(vec![])),
+            closure_env: None,
+        });
+        // str_word_count
+        self.functions.push(FunctionValue {
+            name: "str_word_count".into(),
+            params: vec![FnParam { name: "str".into(), ty: Some(TypeAnnotation::String_), by_ref: false, by_mut_ref: false }],
+            body: Box::new(Stmt::Block(vec![])),
+            closure_env: None,
+        });
+        // chunk_split
+        self.functions.push(FunctionValue {
+            name: "chunk_split".into(),
+            params: vec![FnParam { name: "body".into(), ty: Some(TypeAnnotation::String_), by_ref: false, by_mut_ref: false }],
+            body: Box::new(Stmt::Block(vec![])),
+            closure_env: None,
+        });
+        // array_splice
+        self.functions.push(FunctionValue {
+            name: "array_splice".into(),
+            params: vec![
+                FnParam { name: "arr".into(), ty: None, by_ref: false, by_mut_ref: false },
+                FnParam { name: "offset".into(), ty: Some(TypeAnnotation::Int), by_ref: false, by_mut_ref: false },
+                FnParam { name: "length".into(), ty: Some(TypeAnnotation::Int), by_ref: false, by_mut_ref: false },
+            ],
+            body: Box::new(Stmt::Block(vec![])),
+            closure_env: None,
+        });
+        // array_pad
+        self.functions.push(FunctionValue {
+            name: "array_pad".into(),
+            params: vec![
+                FnParam { name: "arr".into(), ty: None, by_ref: false, by_mut_ref: false },
+                FnParam { name: "size".into(), ty: Some(TypeAnnotation::Int), by_ref: false, by_mut_ref: false },
+                FnParam { name: "value".into(), ty: None, by_ref: false, by_mut_ref: false },
+            ],
+            body: Box::new(Stmt::Block(vec![])),
+            closure_env: None,
+        });
+        // array_key_first
+        self.functions.push(FunctionValue {
+            name: "array_key_first".into(),
+            params: vec![FnParam { name: "arr".into(), ty: None, by_ref: false, by_mut_ref: false }],
+            body: Box::new(Stmt::Block(vec![])),
+            closure_env: None,
+        });
+        // array_key_last
+        self.functions.push(FunctionValue {
+            name: "array_key_last".into(),
+            params: vec![FnParam { name: "arr".into(), ty: None, by_ref: false, by_mut_ref: false }],
+            body: Box::new(Stmt::Block(vec![])),
+            closure_env: None,
+        });
+        // array_is_list
+        self.functions.push(FunctionValue {
+            name: "array_is_list".into(),
+            params: vec![FnParam { name: "arr".into(), ty: None, by_ref: false, by_mut_ref: false }],
+            body: Box::new(Stmt::Block(vec![])),
+            closure_env: None,
+        });
+        // fmod
+        self.functions.push(FunctionValue {
+            name: "fmod".into(),
+            params: vec![
+                FnParam { name: "x".into(), ty: Some(TypeAnnotation::Float), by_ref: false, by_mut_ref: false },
+                FnParam { name: "y".into(), ty: Some(TypeAnnotation::Float), by_ref: false, by_mut_ref: false },
+            ],
+            body: Box::new(Stmt::Block(vec![])),
+            closure_env: None,
+        });
+        // intdiv
+        self.functions.push(FunctionValue {
+            name: "intdiv".into(),
+            params: vec![
+                FnParam { name: "a".into(), ty: Some(TypeAnnotation::Int), by_ref: false, by_mut_ref: false },
+                FnParam { name: "b".into(), ty: Some(TypeAnnotation::Int), by_ref: false, by_mut_ref: false },
+            ],
+            body: Box::new(Stmt::Block(vec![])),
+            closure_env: None,
+        });
+        // checkdate
+        self.functions.push(FunctionValue {
+            name: "checkdate".into(),
+            params: vec![
+                FnParam { name: "month".into(), ty: Some(TypeAnnotation::Int), by_ref: false, by_mut_ref: false },
+                FnParam { name: "day".into(), ty: Some(TypeAnnotation::Int), by_ref: false, by_mut_ref: false },
+                FnParam { name: "year".into(), ty: Some(TypeAnnotation::Int), by_ref: false, by_mut_ref: false },
+            ],
+            body: Box::new(Stmt::Block(vec![])),
+            closure_env: None,
+        });
+        // mktime
+        self.functions.push(FunctionValue {
+            name: "mktime".into(),
+            params: vec![
+                FnParam { name: "hour".into(), ty: Some(TypeAnnotation::Int), by_ref: false, by_mut_ref: false },
+                FnParam { name: "min".into(), ty: Some(TypeAnnotation::Int), by_ref: false, by_mut_ref: false },
+                FnParam { name: "sec".into(), ty: Some(TypeAnnotation::Int), by_ref: false, by_mut_ref: false },
+                FnParam { name: "month".into(), ty: Some(TypeAnnotation::Int), by_ref: false, by_mut_ref: false },
+                FnParam { name: "day".into(), ty: Some(TypeAnnotation::Int), by_ref: false, by_mut_ref: false },
+                FnParam { name: "year".into(), ty: Some(TypeAnnotation::Int), by_ref: false, by_mut_ref: false },
+            ],
+            body: Box::new(Stmt::Block(vec![])),
+            closure_env: None,
+        });
+        // printf
+        self.functions.push(FunctionValue {
+            name: "printf".into(),
+            params: vec![FnParam { name: "format".into(), ty: Some(TypeAnnotation::String_), by_ref: false, by_mut_ref: false }],
+            body: Box::new(Stmt::Block(vec![])),
+            closure_env: None,
+        });
+        // str_starts_with
+        self.functions.push(FunctionValue {
+            name: "str_starts_with".into(),
+            params: vec![
+                FnParam { name: "haystack".into(), ty: Some(TypeAnnotation::String_), by_ref: false, by_mut_ref: false },
+                FnParam { name: "needle".into(), ty: Some(TypeAnnotation::String_), by_ref: false, by_mut_ref: false },
+            ],
+            body: Box::new(Stmt::Block(vec![])),
+            closure_env: None,
+        });
+        // str_ends_with
+        self.functions.push(FunctionValue {
+            name: "str_ends_with".into(),
+            params: vec![
+                FnParam { name: "haystack".into(), ty: Some(TypeAnnotation::String_), by_ref: false, by_mut_ref: false },
+                FnParam { name: "needle".into(), ty: Some(TypeAnnotation::String_), by_ref: false, by_mut_ref: false },
+            ],
+            body: Box::new(Stmt::Block(vec![])),
+            closure_env: None,
+        });
+        // phprs_client_ip
+        self.functions.push(FunctionValue {
+            name: "phprs_client_ip".into(),
+            params: vec![FnParam { name: "fd".into(), ty: Some(TypeAnnotation::Int), by_ref: false, by_mut_ref: false }],
+            body: Box::new(Stmt::Block(vec![])),
+            closure_env: None,
+        });
     }
 
     fn call_builtin(&mut self, name: &str, args: Vec<Value>) -> Result<Value, String> {
@@ -2340,6 +2521,7 @@ impl Interpreter {
             "phprs_mutex_new" => Ok(Value::Int(0)),
             "phprs_mutex_lock" => Ok(Value::Null),
             "phprs_mutex_unlock" => Ok(Value::Null),
+            "phprs_client_ip" => Ok(Value::String_("127.0.0.1".to_string())),
             // ---- Rate Limiting ----
             "phprs_rate_limit_init" => {
                 // no-op in interpreter
@@ -2522,9 +2704,19 @@ impl Interpreter {
                             stem.to_str().unwrap_or("")
                         } else { "" };
                         let extension = p.extension().and_then(|e| e.to_str()).unwrap_or("");
+                        let esc = |s: &str| -> String {
+                            s.chars().map(|c| match c {
+                                '"' => "\\\"".to_string(),
+                                '\\' => "\\\\".to_string(),
+                                '\n' => "\\n".to_string(),
+                                '\r' => "\\r".to_string(),
+                                '\t' => "\\t".to_string(),
+                                c => c.to_string(),
+                            }).collect()
+                        };
                         let json = format!(
                             r#"{{"dirname":"{}","basename":"{}","extension":"{}","filename":"{}"}}"#,
-                            dirname, basename, extension, filename
+                            esc(dirname), esc(basename), esc(extension), esc(filename)
                         );
                         Ok(Value::String_(json))
                     }
@@ -2557,9 +2749,7 @@ impl Interpreter {
                         match std::fs::File::open("/dev/urandom") {
                             Ok(mut f) => { let _ = f.read_exact(&mut buf); }
                             Err(_) => {
-                                use std::time::{SystemTime, UNIX_EPOCH};
-                                let seed = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-                                for i in 0..n { buf[i] = ((seed >> ((i % 8) * 8)) & 0xFF) as u8; }
+                                return Err("random_bytes(): unable to access secure random source".into());
                             }
                         }
                         let hex: String = buf.iter().map(|b| format!("{:02x}", b)).collect();
@@ -2573,19 +2763,21 @@ impl Interpreter {
                 match (&args[0], &args[1]) {
                     (Value::Int(min), Value::Int(max)) => {
                         if min > max { return Err("random_int(): min must be <= max".into()); }
-                        let mut buf = [0u8; 8];
-                        match std::fs::File::open("/dev/urandom") {
-                            Ok(mut f) => { let _ = f.read_exact(&mut buf); }
-                            Err(_) => {
-                                use std::time::{SystemTime, UNIX_EPOCH};
-                                let seed = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() as u64;
-                                buf = seed.to_le_bytes();
-                            }
-                        }
-                        let val = u64::from_le_bytes(buf);
                         let range = (*max - *min) as u64;
-                        let result = if range == 0 { *min } else { *min + (val % (range + 1)) as i64 };
-                        Ok(Value::Int(result))
+                        if range == 0 { return Ok(Value::Int(*min)); }
+                        let threshold = u64::MAX - (u64::MAX % (range + 1));
+                        let val = loop {
+                            let mut buf = [0u8; 8];
+                            match std::fs::File::open("/dev/urandom") {
+                                Ok(mut f) => { let _ = f.read_exact(&mut buf); }
+                                Err(_) => {
+                                    return Err("random_int(): unable to access secure random source".into());
+                                }
+                            }
+                            let v = u64::from_le_bytes(buf);
+                            if v < threshold { break v % (range + 1); }
+                        };
+                        Ok(Value::Int(*min + val as i64))
                     }
                     _ => Err("random_int() expects (int, int)".into()),
                 }
@@ -2598,13 +2790,11 @@ impl Interpreter {
                         match std::fs::File::open("/dev/urandom") {
                             Ok(mut f) => { let _ = f.read_exact(&mut salt_bytes); }
                             Err(_) => {
-                                use std::time::{SystemTime, UNIX_EPOCH};
-                                let seed = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-                                for i in 0..16 { salt_bytes[i] = ((seed >> ((i % 8) * 8)) & 0xFF) as u8; }
+                                return Err("password_hash(): unable to access secure random source".into());
                             }
                         }
                         let salt_hex: String = salt_bytes.iter().map(|b| format!("{:02x}", b)).collect();
-                        let algo_str = if algo == "bcrypt" || algo == "sha256" || algo == "sha1" { algo.as_str() } else { "sha1" };
+                        let algo_str = if algo == "sha1" { "sha1" } else { return Err(format!("password_hash(): unsupported algorithm '{}', only 'sha1' is supported", algo).into()); };
                         let mut hasher = Sha1::new();
                         hasher.update(format!("{}{}", salt_hex, password).as_bytes());
                         let mut hash = hasher.finalize();
@@ -2637,7 +2827,15 @@ impl Interpreter {
                             hash = h.finalize();
                         }
                         let computed_hex = format!("{:x}", hash);
-                        Ok(Value::Bool(computed_hex == parts[2]))
+                        let expected = parts[2];
+                        let result = if computed_hex.len() != expected.len() {
+                            false
+                        } else {
+                            let diff = computed_hex.bytes().zip(expected.bytes())
+                                .fold(0u8, |acc, (a, b)| acc | (a ^ b));
+                            diff == 0
+                        };
+                        Ok(Value::Bool(result))
                     }
                     _ => Err("password_verify() expects (string, string)".into()),
                 }
@@ -2728,6 +2926,359 @@ impl Interpreter {
                         Ok(Value::Array(result))
                     }
                     _ => Err("array_intersect() expects (array, array)".into()),
+                }
+            }
+            // ---- Batch 2: Type Casting ----
+            "intval" => {
+                if args.is_empty() || args.len() > 2 { return Err("intval() expects 1-2 arguments".into()); }
+                let base = if args.len() >= 2 {
+                    match &args[1] { Value::Int(b) => *b as u32, _ => 10 }
+                } else { 10 };
+                match &args[0] {
+                    Value::Int(n) => Ok(Value::Int(*n)),
+                    Value::Float(n) => Ok(Value::Int(*n as i64)),
+                    Value::Bool(b) => Ok(Value::Int(if *b { 1 } else { 0 })),
+                    Value::Null => Ok(Value::Int(0)),
+                    Value::String_(s) => {
+                        let trimmed = s.trim();
+                        if base == 10 {
+                            Ok(Value::Int(trimmed.parse::<i64>().unwrap_or_else(|_| {
+                                trimmed.parse::<f64>().map(|f| f as i64).unwrap_or(0)
+                            })))
+                        } else {
+                            Ok(Value::Int(i64::from_str_radix(trimmed.trim_start_matches("0x").trim_start_matches("0X"), base).unwrap_or(0)))
+                        }
+                    }
+                    _ => Ok(Value::Int(0)),
+                }
+            }
+            "floatval" => {
+                if args.len() != 1 { return Err("floatval() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::Float(n) => Ok(Value::Float(*n)),
+                    Value::Int(n) => Ok(Value::Float(*n as f64)),
+                    Value::Bool(b) => Ok(Value::Float(if *b { 1.0 } else { 0.0 })),
+                    Value::Null => Ok(Value::Float(0.0)),
+                    Value::String_(s) => Ok(Value::Float(s.trim().parse::<f64>().unwrap_or(0.0))),
+                    _ => Ok(Value::Float(0.0)),
+                }
+            }
+            "strval" => {
+                if args.len() != 1 { return Err("strval() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::String_(s) => Ok(Value::String_(s.clone())),
+                    Value::Int(n) => Ok(Value::String_(n.to_string())),
+                    Value::Float(n) => Ok(Value::String_(n.to_string())),
+                    Value::Bool(b) => Ok(Value::String_(if *b { "1".to_string() } else { "".to_string() })),
+                    Value::Null => Ok(Value::String_(String::new())),
+                    _ => Ok(Value::String_("Array".to_string())),
+                }
+            }
+            "boolval" => {
+                if args.len() != 1 { return Err("boolval() expects 1 argument".into()); }
+                let result = match &args[0] {
+                    Value::Bool(b) => *b,
+                    Value::Int(n) => *n != 0,
+                    Value::Float(n) => *n != 0.0,
+                    Value::String_(s) => !s.is_empty() && s != "0",
+                    Value::Null => false,
+                    Value::Array(a) => !a.is_empty(),
+                    Value::Dict(d) => !d.is_empty(),
+                    _ => true,
+                };
+                Ok(Value::Bool(result))
+            }
+            // ---- Batch 2: String Functions ----
+            "str_pad" => {
+                if args.len() < 2 || args.len() > 4 { return Err("str_pad() expects 2-4 arguments".into()); }
+                match (&args[0], &args[1]) {
+                    (Value::String_(input), Value::Int(length)) => {
+                        let pad_str = if args.len() >= 3 {
+                            match &args[2] { Value::String_(s) => s.clone(), _ => " ".to_string() }
+                        } else { " ".to_string() };
+                        let pad_type = if args.len() >= 4 {
+                            match &args[3] { Value::Int(t) => *t, _ => 0 }
+                        } else { 0 };
+                        let target_len = *length as usize;
+                        let input_len = input.chars().count();
+                        if input_len >= target_len || pad_str.is_empty() {
+                            return Ok(Value::String_(input.clone()));
+                        }
+                        let pad_needed = target_len - input_len;
+                        let pad_chars: Vec<char> = pad_str.chars().collect();
+                        let make_pad = |n: usize| -> String {
+                            pad_chars.iter().cycle().take(n).collect()
+                        };
+                        let result = match pad_type {
+                            1 => format!("{}{}", make_pad(pad_needed), input), // STR_PAD_LEFT
+                            2 => { // STR_PAD_BOTH
+                                let left = pad_needed / 2;
+                                let right = pad_needed - left;
+                                format!("{}{}{}", make_pad(left), input, make_pad(right))
+                            }
+                            _ => format!("{}{}", input, make_pad(pad_needed)), // STR_PAD_RIGHT
+                        };
+                        Ok(Value::String_(result))
+                    }
+                    _ => Err("str_pad() expects (string, int, ...)".into()),
+                }
+            }
+            "wordwrap" => {
+                if args.is_empty() || args.len() > 4 { return Err("wordwrap() expects 1-4 arguments".into()); }
+                match &args[0] {
+                    Value::String_(s) => {
+                        let width = if args.len() >= 2 { match &args[1] { Value::Int(n) => *n as usize, _ => 75 } } else { 75 };
+                        let brk = if args.len() >= 3 { match &args[2] { Value::String_(b) => b.clone(), _ => "\n".to_string() } } else { "\n".to_string() };
+                        let cut = if args.len() >= 4 { matches!(&args[3], Value::Bool(true)) } else { false };
+                        if width == 0 && cut { return Err("wordwrap(): width cannot be 0 when cut is true".into()); }
+                        let mut result = String::new();
+                        let mut line_len = 0;
+                        for word in s.split(' ') {
+                            let wlen = word.chars().count();
+                            if cut && wlen > width {
+                                for ch in word.chars() {
+                                    if line_len >= width {
+                                        result.push_str(&brk);
+                                        line_len = 0;
+                                    }
+                                    result.push(ch);
+                                    line_len += 1;
+                                }
+                            } else if line_len + (if line_len > 0 { 1 } else { 0 }) + wlen > width && line_len > 0 {
+                                result.push_str(&brk);
+                                result.push_str(word);
+                                line_len = wlen;
+                            } else {
+                                if line_len > 0 { result.push(' '); line_len += 1; }
+                                result.push_str(word);
+                                line_len += wlen;
+                            }
+                        }
+                        Ok(Value::String_(result))
+                    }
+                    _ => Err("wordwrap() expects a string".into()),
+                }
+            }
+            "str_word_count" => {
+                if args.len() != 1 { return Err("str_word_count() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::String_(s) => Ok(Value::Int(s.split_whitespace().count() as i64)),
+                    _ => Err("str_word_count() expects a string".into()),
+                }
+            }
+            "chunk_split" => {
+                if args.is_empty() || args.len() > 3 { return Err("chunk_split() expects 1-3 arguments".into()); }
+                match &args[0] {
+                    Value::String_(body) => {
+                        let chunklen = if args.len() >= 2 { match &args[1] { Value::Int(n) => (*n).max(1) as usize, _ => 76 } } else { 76 };
+                        let end = if args.len() >= 3 { match &args[2] { Value::String_(s) => s.clone(), _ => "\r\n".to_string() } } else { "\r\n".to_string() };
+                        let chars: Vec<char> = body.chars().collect();
+                        let mut result = String::new();
+                        for chunk in chars.chunks(chunklen) {
+                            let s: String = chunk.iter().collect();
+                            result.push_str(&s);
+                            result.push_str(&end);
+                        }
+                        Ok(Value::String_(result))
+                    }
+                    _ => Err("chunk_split() expects a string".into()),
+                }
+            }
+            // ---- Batch 2: Array Functions ----
+            "array_splice" => {
+                if args.len() < 2 || args.len() > 3 { return Err("array_splice() expects 2-3 arguments".into()); }
+                match &args[0] {
+                    Value::Array(arr) => {
+                        let len = arr.len() as i64;
+                        let offset = match &args[1] { Value::Int(n) => *n, _ => return Err("array_splice() offset must be int".into()) };
+                        let splice_len = if args.len() >= 3 { match &args[2] { Value::Int(n) => *n, _ => len } } else { len };
+                        let start = if offset < 0 { (len + offset).max(0) as usize } else { (offset as usize).min(arr.len()) };
+                        let count = if splice_len < 0 { ((len - start as i64) + splice_len).max(0) as usize } else { (splice_len as usize).min(arr.len() - start) };
+                        let removed: Vec<Value> = arr[start..start+count].to_vec();
+                        Ok(Value::Array(removed))
+                    }
+                    _ => Err("array_splice() expects an array".into()),
+                }
+            }
+            "array_pad" => {
+                if args.len() != 3 { return Err("array_pad() expects 3 arguments".into()); }
+                match (&args[0], &args[1]) {
+                    (Value::Array(arr), Value::Int(size)) => {
+                        let target = (*size).unsigned_abs() as usize;
+                        if arr.len() >= target {
+                            return Ok(Value::Array(arr.clone()));
+                        }
+                        let pad_count = target - arr.len();
+                        let val = args[2].clone();
+                        if *size < 0 {
+                            let mut result: Vec<Value> = std::iter::repeat(val).take(pad_count).collect();
+                            result.extend(arr.iter().cloned());
+                            Ok(Value::Array(result))
+                        } else {
+                            let mut result = arr.clone();
+                            result.extend(std::iter::repeat(val).take(pad_count));
+                            Ok(Value::Array(result))
+                        }
+                    }
+                    _ => Err("array_pad() expects (array, int, value)".into()),
+                }
+            }
+            "array_key_first" => {
+                if args.len() != 1 { return Err("array_key_first() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::Array(arr) => {
+                        if arr.is_empty() { Ok(Value::Null) } else { Ok(Value::Int(0)) }
+                    }
+                    Value::Dict(d) => {
+                        if d.is_empty() { Ok(Value::Null) } else { Ok(Value::String_(d.keys().next().unwrap().clone())) }
+                    }
+                    _ => Err("array_key_first() expects an array".into()),
+                }
+            }
+            "array_key_last" => {
+                if args.len() != 1 { return Err("array_key_last() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::Array(arr) => {
+                        if arr.is_empty() { Ok(Value::Null) } else { Ok(Value::Int(arr.len() as i64 - 1)) }
+                    }
+                    Value::Dict(d) => {
+                        if d.is_empty() { Ok(Value::Null) } else { Ok(Value::String_(d.keys().last().unwrap().clone())) }
+                    }
+                    _ => Err("array_key_last() expects an array".into()),
+                }
+            }
+            "array_is_list" => {
+                if args.len() != 1 { return Err("array_is_list() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::Array(_) => Ok(Value::Bool(true)),
+                    Value::Dict(_) => Ok(Value::Bool(false)),
+                    _ => Err("array_is_list() expects an array".into()),
+                }
+            }
+            // ---- Batch 2: Math/Date ----
+            "fmod" => {
+                if args.len() != 2 { return Err("fmod() expects 2 arguments".into()); }
+                let x = match &args[0] { Value::Float(n) => *n, Value::Int(n) => *n as f64, _ => return Err("fmod() expects numbers".into()) };
+                let y = match &args[1] { Value::Float(n) => *n, Value::Int(n) => *n as f64, _ => return Err("fmod() expects numbers".into()) };
+                Ok(Value::Float(x % y))
+            }
+            "intdiv" => {
+                if args.len() != 2 { return Err("intdiv() expects 2 arguments".into()); }
+                match (&args[0], &args[1]) {
+                    (Value::Int(a), Value::Int(b)) => {
+                        if *b == 0 { return Err("intdiv(): division by zero".into()); }
+                        Ok(Value::Int(a / b))
+                    }
+                    _ => Err("intdiv() expects (int, int)".into()),
+                }
+            }
+            "checkdate" => {
+                if args.len() != 3 { return Err("checkdate() expects 3 arguments".into()); }
+                match (&args[0], &args[1], &args[2]) {
+                    (Value::Int(month), Value::Int(day), Value::Int(year)) => {
+                        let m = *month;
+                        let d = *day;
+                        let y = *year;
+                        if y < 1 || y > 32767 || m < 1 || m > 12 || d < 1 {
+                            return Ok(Value::Bool(false));
+                        }
+                        let days_in_month = match m {
+                            1|3|5|7|8|10|12 => 31,
+                            4|6|9|11 => 30,
+                            2 => if (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 { 29 } else { 28 },
+                            _ => return Ok(Value::Bool(false)),
+                        };
+                        Ok(Value::Bool(d <= days_in_month))
+                    }
+                    _ => Err("checkdate() expects (int, int, int)".into()),
+                }
+            }
+            "mktime" => {
+                if args.len() != 6 { return Err("mktime() expects 6 arguments".into()); }
+                match (&args[0], &args[1], &args[2], &args[3], &args[4], &args[5]) {
+                    (Value::Int(hour), Value::Int(min), Value::Int(sec), Value::Int(month), Value::Int(day), Value::Int(year)) => {
+                        let y = *year;
+                        let m = *month;
+                        let d = *day;
+                        // Days from epoch (1970-01-01) using a simplified algorithm
+                        let mut days: i64 = 0;
+                        // Years
+                        for yr in 1970..y {
+                            days += if (yr % 4 == 0 && yr % 100 != 0) || yr % 400 == 0 { 366 } else { 365 };
+                        }
+                        if y < 1970 {
+                            for yr in y..1970 {
+                                days -= if (yr % 4 == 0 && yr % 100 != 0) || yr % 400 == 0 { 366 } else { 365 };
+                            }
+                        }
+                        // Months
+                        let is_leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+                        let month_days = [31, if is_leap {29} else {28}, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+                        for mi in 0..(m-1) as usize {
+                            if mi < 12 { days += month_days[mi] as i64; }
+                        }
+                        days += d - 1;
+                        let timestamp = days * 86400 + hour * 3600 + min * 60 + sec;
+                        Ok(Value::Int(timestamp))
+                    }
+                    _ => Err("mktime() expects 6 int arguments".into()),
+                }
+            }
+            // ---- Batch 2: Misc ----
+            "printf" => {
+                if args.is_empty() { return Err("printf() expects at least 1 argument".into()); }
+                match &args[0] {
+                    Value::String_(fmt) => {
+                        let mut result = fmt.clone();
+                        let mut arg_idx = 1;
+                        let mut i = 0;
+                        while i < result.len() {
+                            if result.as_bytes().get(i) == Some(&b'%') && i + 1 < result.len() {
+                                let spec = result.as_bytes()[i + 1];
+                                if spec == b'%' {
+                                    result.replace_range(i..i+2, "%");
+                                    i += 1;
+                                    continue;
+                                }
+                                let replacement = if arg_idx < args.len() {
+                                    match &args[arg_idx] {
+                                        Value::String_(s) => s.clone(),
+                                        Value::Int(n) => n.to_string(),
+                                        Value::Float(n) => n.to_string(),
+                                        Value::Bool(b) => (if *b { "true" } else { "false" }).to_string(),
+                                        Value::Null => "null".to_string(),
+                                        _ => format!("{}", args[arg_idx]),
+                                    }
+                                } else { String::new() };
+                                result.replace_range(i..i+2, &replacement);
+                                i += replacement.len();
+                                arg_idx += 1;
+                                continue;
+                            }
+                            i += 1;
+                        }
+                        print!("{}", result);
+                        Ok(Value::Null)
+                    }
+                    _ => Err("printf() expects a format string".into()),
+                }
+            }
+            "str_starts_with" => {
+                if args.len() != 2 { return Err("str_starts_with() expects 2 arguments".into()); }
+                match (&args[0], &args[1]) {
+                    (Value::String_(haystack), Value::String_(needle)) => {
+                        Ok(Value::Bool(haystack.starts_with(needle.as_str())))
+                    }
+                    _ => Err("str_starts_with() expects (string, string)".into()),
+                }
+            }
+            "str_ends_with" => {
+                if args.len() != 2 { return Err("str_ends_with() expects 2 arguments".into()); }
+                match (&args[0], &args[1]) {
+                    (Value::String_(haystack), Value::String_(needle)) => {
+                        Ok(Value::Bool(haystack.ends_with(needle.as_str())))
+                    }
+                    _ => Err("str_ends_with() expects (string, string)".into()),
                 }
             }
             _ => Err(format!("Unknown builtin function: {}", name)),
@@ -3792,7 +4343,7 @@ impl Interpreter {
             | "file_get_contents" | "file_put_contents" | "file_exists"
             | "is_dir" | "mkdir" | "unlink" | "basename" | "dirname" | "scandir"
             // Socket Primitives
-            | "phprs_server_new" | "phprs_server_accept"
+            | "phprs_server_new" | "phprs_server_accept" | "phprs_client_ip"
             | "phprs_socket_read" | "phprs_socket_write" | "phprs_socket_close"
             // File I/O
             | "phprs_file_read" | "phprs_file_write" | "phprs_file_exists"
@@ -3829,6 +4380,16 @@ impl Interpreter {
             | "password_hash" | "password_verify" | "random_bytes" | "random_int"
             // Array functions
             | "array_chunk" | "array_count_values" | "array_product" | "array_intersect"
+            // Batch 2: Type casting
+            | "intval" | "floatval" | "strval" | "boolval"
+            // Batch 2: String functions
+            | "str_pad" | "wordwrap" | "str_word_count" | "chunk_split"
+            // Batch 2: Array functions
+            | "array_splice" | "array_pad" | "array_key_first" | "array_key_last" | "array_is_list"
+            // Batch 2: Math/Date
+            | "fmod" | "intdiv" | "checkdate" | "mktime"
+            // Batch 2: Misc
+            | "printf" | "str_starts_with" | "str_ends_with"
         )
     }
 

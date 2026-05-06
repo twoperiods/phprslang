@@ -6,25 +6,26 @@ PHPRS 所有内置函数与运行时系统函数的完整参考。
 
 1. [语言内置函数](#语言内置函数)
 2. [异常处理 (try/catch/throw)](#异常处理-trycatchthrow)
-3. [类型检查函数](#类型检查函数)
-4. [字符串处理](#字符串处理)
-5. [URL 与编码函数](#url-与编码函数)
-6. [数组函数](#数组函数)
-7. [数学函数](#数学函数)
-8. [日期时间函数](#日期时间函数)
-9. [JSON 函数](#json-函数)
-10. [文件系统函数](#文件系统函数)
-11. [哈希与安全函数](#哈希与安全函数)
-12. [语言特性](#语言特性)
-13. [低级字符串函数 (phprs_* 前缀)](#低级字符串函数-phprs_-前缀)
-14. [Socket 网络原语](#socket-网络原语)
-15. [网络连接](#网络连接)
-16. [HTTP 请求解析（服务端）](#http-请求解析服务端)
-17. [HTTP 响应构建（服务端）](#http-响应构建服务端)
-18. [HTTP 客户端](#http-客户端)
-19. [WebSocket](#websocket)
-20. [多线程](#多线程)
-21. [curl HTTP 客户端](#curl--新一代-http-客户端)
+3. [类型转换函数](#类型转换函数)
+4. [类型检查函数](#类型检查函数)
+5. [字符串处理](#字符串处理)
+6. [URL 与编码函数](#url-与编码函数)
+7. [数组函数](#数组函数)
+8. [数学函数](#数学函数)
+9. [日期时间函数](#日期时间函数)
+10. [JSON 函数](#json-函数)
+11. [文件系统函数](#文件系统函数)
+12. [哈希与安全函数](#哈希与安全函数)
+13. [语言特性](#语言特性)
+14. [低级字符串函数 (phprs_* 前缀)](#低级字符串函数-phprs_-前缀)
+15. [Socket 网络原语](#socket-网络原语)
+16. [网络连接](#网络连接)
+17. [HTTP 请求解析（服务端）](#http-请求解析服务端)
+18. [HTTP 响应构建（服务端）](#http-响应构建服务端)
+19. [HTTP 客户端](#http-客户端)
+20. [WebSocket](#websocket)
+21. [多线程](#多线程)
+22. [curl HTTP 客户端](#curl--新一代-http-客户端)
 
 ---
 
@@ -256,6 +257,58 @@ try {
 // 输出:
 // 内层捕获: 内层错误
 // 外层捕获: 外层错误
+```
+
+---
+
+## 类型转换函数
+
+### `intval(mixed $value, int $base = 10): int`
+
+将值转换为整数。字符串支持指定进制解析。
+
+```php
+echo intval("42");           // 42
+echo intval("0xFF", 16);    // 255
+echo intval("0b1010", 2);   // 10
+echo intval("077", 8);      // 63
+echo intval(3.14);           // 3
+echo intval(true);           // 1
+echo intval(false);          // 0
+```
+
+### `floatval(mixed $value): float`
+
+将值转换为浮点数。
+
+```php
+echo floatval("3.14");    // 3.14
+echo floatval("42");      // 42.0
+echo floatval("1.2e3");   // 1200.0
+echo floatval(true);      // 1.0
+```
+
+### `strval(mixed $value): string`
+
+将值转换为字符串。
+
+```php
+echo strval(123);      // "123"
+echo strval(3.14);     // "3.14"
+echo strval(true);     // "1"
+echo strval(false);    // ""
+echo strval(null);     // ""
+```
+
+### `boolval(mixed $value): bool`
+
+将值转换为布尔值。空字符串、`0`、`null` 为 `false`，其余为 `true`。
+
+```php
+if (boolval("hello") == true) { echo "truthy\n"; }   // truthy
+if (boolval("") == false) { echo "falsy\n"; }        // falsy
+if (boolval(0) == false) { echo "zero is false\n"; } // zero is false
+if (boolval(1) == true) { echo "one is true\n"; }    // one is true
 ```
 
 ---
@@ -558,6 +611,94 @@ echo $escaped;  // "It\'s \"cool\""
 ```php
 let $original = stripslashes("It\\'s \\\"cool\\\"");
 echo $original;  // "It's \"cool\""
+```
+
+### `str_pad(string $input, int $length, string $pad = " ", int $type = 0): string`
+
+用指定字符将字符串填充到指定长度。`type`: 0=右填充, 1=左填充, 2=两侧填充。
+
+```php
+echo str_pad("42", 5, "0", 1);     // "00042" (左填充)
+echo str_pad("hi", 6, ".");         // "hi...." (右填充)
+echo str_pad("hi", 8, "-+", 2);    // "-+-hi-+-" (两侧填充)
+echo str_pad("hello", 10);          // "hello     " (默认空格右填充)
+```
+
+### `wordwrap(string $str, int $width = 75, string $break = "\n", bool $cut = false): string`
+
+在指定宽度处对文本进行换行。`cut=true` 时会在单词中间截断。
+
+```php
+let $text = "The quick brown fox jumped over the lazy dog";
+echo wordwrap($text, 15, "\n", false);
+// 输出:
+// The quick brown
+// fox jumped over
+// the lazy dog
+
+echo wordwrap("ABCDEFGHIJ", 3, "-", true);
+// "ABC-DEF-GHI-J"
+```
+
+### `str_word_count(string $str): int`
+
+统计字符串中的单词数量（以空格分隔）。
+
+```php
+echo str_word_count("Hello World how are you");  // 5
+echo str_word_count("one");                       // 1
+echo str_word_count("");                           // 0
+```
+
+### `chunk_split(string $body, int $chunklen = 76, string $end = "\r\n"): string`
+
+每隔 N 个字符插入一个分隔符。
+
+```php
+echo chunk_split("abcdefgh", 3, "-");   // "abc-def-gh-"
+echo chunk_split("Hello", 2, ".");      // "He.ll.o."
+
+// 常用于 Base64 格式化：
+let $b64 = base64_encode("some long data...");
+echo chunk_split($b64, 76, "\r\n");
+```
+
+### `printf(string $format, ...args): void`
+
+格式化输出到标准输出（同 `sprintf` + `echo`）。
+
+```php
+printf("Name: %s, Age: %d\n", "Alice", 25);
+// 输出: Name: Alice, Age: 25
+
+printf("Price: %.2f\n", 9.99);
+// 输出: Price: 9.99
+```
+
+### `str_starts_with(string $haystack, string $needle): bool`
+
+检查字符串是否以指定前缀开头（PHP 8 标准命名）。
+
+```php
+if (str_starts_with("hello world", "hello")) {
+    echo "starts with hello\n";  // 输出
+}
+if (str_starts_with("/api/users", "/api/") == true) {
+    echo "is API route\n";  // 输出
+}
+```
+
+### `str_ends_with(string $haystack, string $needle): bool`
+
+检查字符串是否以指定后缀结尾（PHP 8 标准命名）。
+
+```php
+if (str_ends_with("report.pdf", ".pdf")) {
+    echo "is PDF file\n";  // 输出
+}
+if (str_ends_with("/api/data.json", ".json") == true) {
+    echo "is JSON endpoint\n";  // 输出
+}
 ```
 
 ---
@@ -925,6 +1066,63 @@ let $inter = array_intersect($a, $b);
 // $inter 是 [3, 4, 5]
 ```
 
+### `array_splice(array $arr, int $offset, int $length): array`
+
+从数组中移除指定范围的元素，返回被移除的元素。
+
+```php
+let $arr = [10, 20, 30, 40, 50];
+let $removed = array_splice($arr, 1, 2);
+echo json_encode($removed);  // [20,30]
+// 注意：PHPRS 中值不可变，原数组不变
+
+let $data = ["a", "b", "c", "d", "e"];
+let $cut = array_splice($data, 2, 3);
+echo json_encode($cut);      // ["c","d","e"]
+```
+
+### `array_pad(array $arr, int $size, mixed $value): array`
+
+用指定值将数组填充到指定长度。正数右填充，负数左填充。
+
+```php
+let $a = [1, 2, 3];
+echo json_encode(array_pad($a, 5, 0));    // [1,2,3,0,0]
+echo json_encode(array_pad($a, -5, 0));   // [0,0,1,2,3]
+echo json_encode(array_pad($a, 2, 0));    // [1,2,3] (已够长，不变)
+```
+
+### `array_key_first(array $arr): mixed`
+
+返回数组的第一个键。列表数组返回 `0`，字典返回第一个键名。
+
+```php
+echo array_key_first([10, 20, 30]);       // 0
+echo array_key_first(["x" => 1, "y" => 2]); // "x"
+```
+
+### `array_key_last(array $arr): mixed`
+
+返回数组的最后一个键。
+
+```php
+echo array_key_last([10, 20, 30]);        // 2
+echo array_key_last(["a" => 1, "b" => 2]); // "b"
+```
+
+### `array_is_list(array $arr): bool`
+
+检查数组是否为从 0 开始的连续整数索引列表。
+
+```php
+if (array_is_list([1, 2, 3]) == true) {
+    echo "是列表\n";  // 输出
+}
+if (array_is_list(["a" => 1]) == false) {
+    echo "不是列表\n";  // 输出
+}
+```
+
 ---
 
 ## 数学函数
@@ -1017,6 +1215,27 @@ echo sqrt(16);   // 4.0
 echo sqrt(2);    // 1.4142...
 ```
 
+### `fmod(float $x, float $y): float`
+
+返回浮点数除法的余数。
+
+```php
+echo fmod(10.5, 3.2);   // 0.9 (约数)
+echo fmod(7.0, 2.5);    // 2.0
+echo fmod(-5.5, 2.0);   // -1.5
+```
+
+### `intdiv(int $a, int $b): int`
+
+返回整数除法的商（向零取整）。
+
+```php
+echo intdiv(7, 2);     // 3
+echo intdiv(10, 3);    // 3
+echo intdiv(-7, 2);    // -3
+echo intdiv(0, 5);     // 0
+```
+
 ---
 
 ## 日期时间函数
@@ -1053,6 +1272,40 @@ echo $ts;
 
 ```php
 echo microtime();  // "1715678901 123456"
+```
+
+### `checkdate(int $month, int $day, int $year): bool`
+
+验证日期是否合法（考虑闰年）。
+
+```php
+if (checkdate(2, 29, 2024) == true) {
+    echo "2024 是闰年\n";  // 输出
+}
+if (checkdate(2, 29, 2023) == false) {
+    echo "2023 不是闰年\n";  // 输出
+}
+if (checkdate(13, 1, 2024) == false) {
+    echo "没有13月\n";  // 输出
+}
+echo checkdate(12, 31, 2024);  // true
+echo checkdate(4, 31, 2024);   // false (4月只有30天)
+```
+
+### `mktime(int $hour, int $min, int $sec, int $month, int $day, int $year): int`
+
+根据日期时间各部分创建 Unix 时间戳。
+
+```php
+let $ts = mktime(0, 0, 0, 1, 1, 1970);
+echo $ts;   // 0 (Unix 纪元)
+
+let $ts2 = mktime(12, 30, 0, 6, 15, 2024);
+echo $ts2;  // 1718451000 (2024-06-15 12:30:00 UTC)
+
+// 可用于日期运算：
+let $tomorrow = mktime(0, 0, 0, 5, 8, 2026);
+echo date("Y-m-d", $tomorrow);  // "2026-05-08"
 ```
 
 ---
@@ -1595,11 +1848,29 @@ if ($server_fd < 0) {
 ### `phprs_server_accept(int $fd): int`
 
 接受一个客户端连接。阻塞直到有客户端连接进来。返回客户端 socket fd，失败返回 `-1`。
+同时会保存客户端 IP 地址，可通过 `phprs_client_ip()` 获取。
 
 ```php
 let $client_fd = phprs_server_accept($server_fd);
 if ($client_fd >= 0) {
     // 处理客户端连接
+    let $ip = phprs_client_ip($client_fd);
+    echo "Client connected from: " . $ip . "\n";
+}
+```
+
+### `phprs_client_ip(int $fd): string`
+
+获取最近一次 `phprs_server_accept()` 接受的客户端的 IP 地址。
+
+```php
+let $client = phprs_server_accept($sock);
+let $ip = phprs_client_ip($client);
+echo "Connected from: " . $ip . "\n";  // 如 "192.168.1.100"
+
+// 常用于速率限制、日志记录：
+if (rate_limit_allow($ip) == 0) {
+    echo "Rate limited: " . $ip . "\n";
 }
 ```
 
@@ -2518,3 +2789,24 @@ phprs_mutex_unlock($mutex);
 | `curl_async` | `(string, dict): int` | 异步 HTTP 请求（返回句柄） |
 | `curl_wait` | `(int): dict` | 等待异步请求完成 |
 | `curl_is_done` | `(int): bool` | 检查异步请求是否完成 |
+| `intval` | `(mixed, int): int` | 转换为整数 |
+| `floatval` | `(mixed): float` | 转换为浮点数 |
+| `strval` | `(mixed): string` | 转换为字符串 |
+| `boolval` | `(mixed): bool` | 转换为布尔值 |
+| `str_pad` | `(string, int, string, int): string` | 填充字符串 |
+| `wordwrap` | `(string, int, string, bool): string` | 文本换行 |
+| `str_word_count` | `(string): int` | 统计单词数 |
+| `chunk_split` | `(string, int, string): string` | 分块插入分隔符 |
+| `printf` | `(string, ...): void` | 格式化输出 |
+| `str_starts_with` | `(string, string): bool` | 检查前缀 |
+| `str_ends_with` | `(string, string): bool` | 检查后缀 |
+| `array_splice` | `(array, int, int): array` | 移除数组切片 |
+| `array_pad` | `(array, int, mixed): array` | 填充数组 |
+| `array_key_first` | `(array): mixed` | 第一个键 |
+| `array_key_last` | `(array): mixed` | 最后一个键 |
+| `array_is_list` | `(array): bool` | 是否为列表 |
+| `fmod` | `(float, float): float` | 浮点取模 |
+| `intdiv` | `(int, int): int` | 整数除法 |
+| `checkdate` | `(int, int, int): bool` | 验证日期合法性 |
+| `mktime` | `(int, int, int, int, int, int): int` | 构造时间戳 |
+| `phprs_client_ip` | `(int): string` | 获取客户端 IP |

@@ -182,6 +182,28 @@ impl CTranspiler {
             ("array_count_values", "const char*"),
             ("array_product", "double"),
             ("array_intersect", "const char*"),
+            // Batch 2
+            ("intval", "int64_t"),
+            ("floatval", "double"),
+            ("strval", "const char*"),
+            ("boolval", "bool"),
+            ("str_pad", "const char*"),
+            ("wordwrap", "const char*"),
+            ("str_word_count", "int64_t"),
+            ("chunk_split", "const char*"),
+            ("array_splice", "const char*"),
+            ("array_pad", "const char*"),
+            ("array_key_first", "int64_t"),
+            ("array_key_last", "int64_t"),
+            ("array_is_list", "bool"),
+            ("fmod", "double"),
+            ("intdiv", "int64_t"),
+            ("checkdate", "bool"),
+            ("mktime", "int64_t"),
+            ("printf", "void"),
+            ("str_starts_with", "bool"),
+            ("str_ends_with", "bool"),
+            ("phprs_client_ip", "string"),
         ];
         for (name, ret) in builtins {
             if !self.func_return_types.contains_key(name) {
@@ -822,6 +844,8 @@ impl CTranspiler {
                         "dirname" => self.write("dirname_"),
                         "scandir" => self.write("scandir_"),
                         "rename" => self.write("rename_"),
+                        "fmod" => self.write("fmod_"),
+                        "mktime" => self.write("mktime_"),
                         _ => self.write(name),
                     }
                 } else {
@@ -1060,6 +1084,8 @@ impl CTranspiler {
                         "dirname" => self.write("dirname_"),
                         "scandir" => self.write("scandir_"),
                         "rename" => self.write("rename_"),
+                        "fmod" => self.write("fmod_"),
+                        "mktime" => self.write("mktime_"),
                         _ => self.write(name),
                     }
                     self.write("(");

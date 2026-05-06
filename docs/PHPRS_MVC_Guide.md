@@ -14,7 +14,8 @@ PHPRS 是一种将 PHP 简洁语法与 Rust 级性能相结合的编程语言。
 8. [phprs_request_parse(): 统一请求数据获取](#phprs_request_parse-统一请求数据获取)
 9. [Blog 示例应用](#blog-示例应用)
 10. [WebSocket 支持](#websocket-支持)
-11. [API 参考](#api-参考)
+11. [安全特性](#安全特性)
+12. [API 参考](#api-参考)
 12. [部署](#部署)
 13. [故障排除](#故障排除)
 
@@ -1462,10 +1463,235 @@ if (ws_accept($raw, $client) == 1) {
 
 ### 限制
 
-- **单连接**：当前实现串行处理连接，同一时间只能处理一个 WebSocket 客户端
+- **WebSocket 线程隔离**：每个 WebSocket 连接在独立线程中运行，不会阻塞 HTTP 服务
 - **阻塞 I/O**：读写均为阻塞模式，与现有服务器模型一致
 - **无分片支持**：每个帧独立处理，不支持跨帧重组大消息
 - **1 MB 帧大小限制**：防止内存耗尽
+- **回声模式**：chat 端点为演示用途，仅回显给发送者（真正的广播需跟踪所有连接 FD）
+
+---
+
+## 安全特性
+
+PHPRS MVC 框架内置多项安全机制，保护应用免受常见 Web 攻击。
+
+### CSRF 防护
+
+所有 POST/PUT/PATCH/DELETE 请求自动验证 CSRF token。
+
+#### 生成 Token
+
+```php
+<?phprs
+include "system/request.phprs";
+
+// 在 HTML 表单中嵌入 CSRF 隐藏字段：
+function show_form(string $raw): string {
+    let $html = "<form method=\"POST\" action=\"/api/db/create\">"
+        . csrf_field($raw)
+        . "<input name=\"name\" placeholder=\"Name\">"
+        . "<button type=\"submit\">Submit</button>"
+        . "</form>";
+    return render_page("New Record", $html);
+}
+?>
+```
+
+#### 验证流程
+
+框架在 `app_dispatch` 中自动验证所有写操作请求：
+
+```php
+// 自动执行，无需手动调用：
+if ($method == "POST" || $method == "PUT" || $method == "PATCH" || $method == "DELETE") {
+    let $csrf = request_param($body, "_csrf_token");
+    if (csrf_verify($raw, $csrf) == 0) {
+        return api_error(403, "CSRF token invalid");
+    }
+}
+```
+
+#### API 客户端使用
+
+JSON API 请求中包含 `_csrf_token` 字段：
+
+```bash
+# 先获取 token（通过 session cookie）
+curl -c cookies.txt http://localhost:8080/
+
+# 提交带 CSRF token 的 POST 请求
+curl -b cookies.txt -X POST http://localhost:8080/api/db/create \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Alice","email":"a@b.com","title":"Test","_csrf_token":"YOUR_TOKEN"}'
+```
+
+### Session 管理
+
+基于文件的 Session 存储，使用加密安全的 Session ID。
+
+```php
+<?phprs
+include "system/request.phprs";
+
+// 启动/恢复 session
+let $sid = session_start($raw);
+
+// 读取 session 数据
+let $username = session_get($sid, "username");
+
+// 写入 session 数据
+session_set($sid, "username", "Alice");
+session_set($sid, "role", "admin");
+
+// 设置 session cookie（在响应头中）
+let $cookie_hdr = session_cookie_header($sid);
+// 返回：Set-Cookie: PHPRS_SESSID=sess_xxx; Path=/; HttpOnly; SameSite=Strict
+
+// 销毁 session（登出）
+session_destroy($sid);
+?>
+```
+
+**安全特性**：
+- Session ID 使用 `md5(random_bytes(32))` 生成（加密安全）
+- Cookie 设置 `HttpOnly`（防 XSS 窃取）和 `SameSite=Strict`（防 CSRF）
+- Session ID 验证：仅允许 `[a-zA-Z0-9_-]`，最长 64 字符（防路径遍历）
+
+### CORS 跨域配置
+
+默认限制为 `http://localhost:8080`，生产环境应修改为实际域名。
+
+```php
+<?phprs
+// 在 app_main() 中配置 CORS：
+cors_config("https://your-domain.com", "GET,POST,PUT,DELETE,PATCH,OPTIONS", "Content-Type,Authorization");
+
+// 框架自动处理：
+// 1. OPTIONS 预检请求返回正确的 CORS 头
+// 2. 所有响应注入 Access-Control-Allow-* 头
+?>
+```
+
+#### 修改 CORS 配置
+
+编辑 `app.phprs` 中的 `app_main()` 函数：
+
+```php
+// 允许多个来源（生产环境）：
+cors_config("https://app.example.com", "GET,POST,PUT,DELETE", "Content-Type,Authorization,X-Custom-Header");
+
+// 开发环境允许所有来源：
+cors_config("*", "GET,POST,PUT,DELETE,PATCH,OPTIONS", "Content-Type,Authorization");
+```
+
+### XSS 防护
+
+#### 模板引擎自动转义
+
+`view_render_var()` 默认对所有变量进行 HTML 转义：
+
+```php
+<?phprs
+include "system/view.phprs";
+
+let $template = "<h1>Hello, {{name}}</h1>";
+let $user_input = "<script>alert('xss')</script>";
+
+// 安全：自动转义
+let $safe = view_render_var($template, "name", $user_input);
+// 输出: <h1>Hello, &lt;script&gt;alert(&#039;xss&#039;)&lt;/script&gt;</h1>
+
+// 如确实需要插入 HTML（仅用于受信内容）：
+let $raw_html = view_render_var_raw($template, "name", "<strong>Bold</strong>");
+?>
+```
+
+#### render_page 标题转义
+
+`render_page()` 自动对 `$title` 参数进行 HTML 转义：
+
+```php
+// 安全：即使标题包含用户输入也不会产生 XSS
+let $response = render_page($user_title, $html_body);
+```
+
+#### 手动转义
+
+```php
+let $safe = view_escape($user_input);
+// 转义字符：& < > " '
+```
+
+### 速率限制
+
+基于客户端 IP 的请求频率限制：
+
+```php
+<?phprs
+// 配置：100 请求/分钟（每 IP）
+rate_limit_config(100, 60);
+
+// 自动应用于所有请求 —— 超限返回 429：
+// HTTP/1.1 429 Too Many Requests
+// {"code":429,"msg":"Too Many Requests"...}
+?>
+```
+
+**自定义配置**：
+
+```php
+// 严格限制：10 请求/分钟
+rate_limit_config(10, 60);
+
+// 宽松限制：1000 请求/分钟
+rate_limit_config(1000, 60);
+```
+
+### 客户端 IP 获取
+
+框架从 TCP 连接自动提取客户端真实 IP（非硬编码）：
+
+```php
+<?phprs
+// 在请求处理中获取客户端 IP：
+let $server = request_server($raw, $port, $client_fd);
+let $ip = server_param($server, "REMOTE_ADDR");
+echo "Client IP: " . $ip . "\n";  // 如 "192.168.1.100"
+
+// 或直接使用底层函数：
+let $ip = phprs_client_ip($client_fd);
+?>
+```
+
+### URL 解码
+
+`request_param()` 自动对提取的参数值进行 URL 解码：
+
+```php
+// 请求: GET /search?q=hello%20world
+let $query = request_param($params, "q");
+echo $query;  // "hello world" （自动解码）
+```
+
+### 数据库操作错误处理
+
+所有写操作（create/update/delete）检查文件写入结果，失败返回 500：
+
+```php
+// 如果磁盘满或权限不足，返回：
+// HTTP/1.1 500 Internal Server Error
+// {"code":500,"msg":"Failed to save record","data":[]}
+```
+
+### 安全最佳实践
+
+1. **CSRF**：HTML 表单使用 `csrf_field($raw)` 嵌入 token
+2. **XSS**：始终使用 `view_render_var()`（自动转义），仅对受信 HTML 使用 `view_render_var_raw()`
+3. **CORS**：生产环境将 `*` 替换为实际域名
+4. **Session**：不要在 URL 中传递 session ID
+5. **输入验证**：对路由参数使用类型约束（`{int}` 自动拒绝溢出值）
+6. **密码**：使用 `password_hash()` / `password_verify()`（SHA1 HMAC + 安全随机）
+7. **随机数**：使用 `random_bytes()` / `random_int()`（加密安全）
 
 ---
 

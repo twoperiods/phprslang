@@ -44,7 +44,7 @@ function view_render(string $template, [string] $keys, [string] $values): string
 function view_load(string $view_path, [string] $keys, [string] $values): string {
     let $template = phprs_file_read($view_path);
     if ($template == "") {
-        return "<html><body><h1>View not found: " . $view_path . "</h1></body></html>";
+        return "<html><body><h1>View not found: " . view_escape($view_path) . "</h1></body></html>";
     }
     return view_render($template, $keys, $values);
 }

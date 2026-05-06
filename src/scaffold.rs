@@ -121,6 +121,7 @@ fn app_template(name: &str) -> String {
 
 include "system/runtime.phprs";
 include "system/request.phprs";
+include "system/view.phprs";
 include "config/router_simple.phprs";
 include "views/layout.phprs";
 include "controllers/home_controller.phprs";
@@ -132,11 +133,26 @@ include "middleware/cors.phprs";
 
 // ------- Route Dispatch -------
 
-function app_dispatch(string $method, string $path, string $raw, string $routes, int $port): string {{
+function app_dispatch(string $method, string $path, string $raw, string $routes, int $port, int $client_fd): string {{
     let $m = route_match($method, $path, $routes);
     let $h = route_handler($m);
     let $p = route_params($m);
-    let $server = request_server($raw, $port);
+    let $server = request_server($raw, $port, $client_fd);
+
+    // CSRF protection: verify token on all POST/PUT/PATCH/DELETE requests
+    if ($method == "POST" || $method == "PUT" || $method == "PATCH" || $method == "DELETE") {{
+        let $body = phprs_http_body($raw);
+        let $csrf = request_param($body, "_csrf_token");
+        if ($csrf == "") {{
+            let $ct = phprs_http_header($raw, "Content-Type");
+            if (phprs_str_contains($ct, "json") == 1) {{
+                $csrf = phprs_json_get_string($body, "_csrf_token");
+            }}
+        }}
+        if (csrf_verify($raw, $csrf) == 0) {{
+            return api_error(403, "CSRF token invalid");
+        }}
+    }}
 
     if ($h == "home_index")    {{ return home_index(); }}
     if ($h == "home_about")    {{ return home_about(); }}
@@ -204,7 +220,7 @@ function app_main(): void {{
 
     // ---- Middleware Config ----
     rate_limit_config(100, 60);   // 100 req/min per IP
-    cors_config("*", "GET,POST,PUT,DELETE,PATCH,OPTIONS", "Content-Type,Authorization");
+    cors_config("http://localhost:8080", "GET,POST,PUT,DELETE,PATCH,OPTIONS", "Content-Type,Authorization");
 
     let $sock = phprs_server_new($port);
 
@@ -228,7 +244,7 @@ function app_main(): void {{
         if ($client >= 0) {{
             let $raw = phprs_socket_read($client, 65536);
             if ($raw != "") {{
-                let $server = request_server($raw, $port);
+                let $server = request_server($raw, $port, $client);
                 let $ip = server_param($server, "REMOTE_ADDR");
 
                 // --- Rate Limit ---
@@ -257,15 +273,14 @@ function app_main(): void {{
                 if (phprs_is_websocket_upgrade($raw) == 1) {{
                     ws_accept($raw, $client);
                     if (phprs_str_starts_with($path, "/ws/echo") == 1) {{
-                        ws_handle_echo($client, $path);
+                        phprs_thread_spawn("ws_handle_echo", $client);
                     }} else {{
-                        ws_handle_chat($client, $path);
+                        phprs_thread_spawn("ws_handle_chat", $client);
                     }}
-                    phprs_socket_close($client);
                     continue;
                 }}
 
-                let $response = app_dispatch($method, $path, $raw, $RT, $port);
+                let $response = app_dispatch($method, $path, $raw, $RT, $port, $client);
 
                 // --- Inject CORS headers ---
                 let $cors_hdrs = cors_headers();
@@ -295,6 +310,7 @@ const RUNTIME_TEMPLATE: &str = r##"<?phprs
 // ---- Socket Primitives ----
 extern function phprs_server_new(int $port): int;
 extern function phprs_server_accept(int $fd): int;
+extern function phprs_client_ip(int $fd): string;
 extern function phprs_socket_read(int $fd, int $max_size): string;
 extern function phprs_socket_write(int $fd, string $data): int;
 extern function phprs_socket_close(int $fd): void;
@@ -411,6 +427,11 @@ extern function usleep(int $microseconds): void;
 extern function md5(string $s): string;
 extern function sha1(string $s): string;
 extern function uniqid(string $prefix): string;
+extern function random_bytes(int $length): string;
+extern function random_int(int $min, int $max): int;
+
+// ---- Threading ----
+extern function phprs_thread_spawn(string $func_name, int $arg): int;
 
 // ---- Middleware ----
 extern function phprs_rate_limit_init(int $max_req, int $window_sec): void;
@@ -663,7 +684,10 @@ function db_create(string $raw): string {
 
     let $rows_json = db_load_all();
     let $updated = db_append_record($rows_json, $new_row);
-    db_save_all($updated);
+    let $written = db_save_all($updated);
+    if ($written < 0) {
+        return api_error(500, "Failed to save record");
+    }
 
     let $data = json_encode(["message"=>"Created", "record"=>$new_row]);
     return api_response(201, "Created", $data);
@@ -717,7 +741,10 @@ function db_update(string $raw): string {
     ]);
 
     let $updated_json = db_replace_record($rows_json, $id, $updated_row);
-    db_save_all($updated_json);
+    let $written = db_save_all($updated_json);
+    if ($written < 0) {
+        return api_error(500, "Failed to save record");
+    }
 
     let $data = json_encode(["message"=>"Updated", "record"=>$updated_row]);
     return api_response(200, "OK", $data);
@@ -735,7 +762,10 @@ function db_delete(string $params): string {
         return api_error(404, "Record not found: " . $id);
     }
     let $updated = db_remove_record($rows_json, $id);
-    db_save_all($updated);
+    let $written = db_save_all($updated);
+    if ($written < 0) {
+        return api_error(500, "Failed to save record");
+    }
 
     let $data = json_encode(["message"=>"Deleted", "id"=>$id]);
     return api_response(200, "OK", $data);
@@ -1197,7 +1227,7 @@ function render_page(string $title, string $body): string {
 </body>
 </html>";
 
-    let $result = phprs_str_replace($html, "{{title}}", $title);
+    let $result = phprs_str_replace($html, "{{title}}", view_escape($title));
     $result = phprs_str_replace($result, "{{body}}", $body);
     return phprs_http_response(200, "text/html; charset=utf-8", $result);
 }

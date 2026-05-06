@@ -179,13 +179,23 @@ int64_t phprs_server_new(int64_t port) {
     return (int64_t)sock;
 }
 
+static char phprs_last_client_ip[64] = "127.0.0.1";
+
 int64_t phprs_server_accept(int64_t server_fd) {
     struct sockaddr_in client_addr;
     socklen_t len = sizeof(client_addr);
     phprs_socket_t client = accept((phprs_socket_t)server_fd,
         (struct sockaddr*)&client_addr, &len);
     if (client == PHPRS_INVALID_SOCKET) return -1;
+    unsigned char *ip = (unsigned char*)&client_addr.sin_addr;
+    snprintf(phprs_last_client_ip, sizeof(phprs_last_client_ip),
+        "%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
     return (int64_t)client;
+}
+
+const char* phprs_client_ip(int64_t fd) {
+    (void)fd;
+    return strdup(phprs_last_client_ip);
 }
 
 #ifdef _WIN32
@@ -3706,7 +3716,18 @@ const char* chr(int64_t codepoint) {
 
 int64_t ord(const char* s) {
     if (!s || !*s) return 0;
-    return (int64_t)(unsigned char)s[0];
+    unsigned char c = (unsigned char)s[0];
+    if (c < 0x80) return (int64_t)c;
+    int64_t cp = 0; int bytes = 0;
+    if ((c & 0xE0) == 0xC0)      { cp = c & 0x1F; bytes = 2; }
+    else if ((c & 0xF0) == 0xE0) { cp = c & 0x0F; bytes = 3; }
+    else if ((c & 0xF8) == 0xF0) { cp = c & 0x07; bytes = 4; }
+    else return (int64_t)c;
+    for (int i = 1; i < bytes; i++) {
+        if (((unsigned char)s[i] & 0xC0) != 0x80) return (int64_t)c;
+        cp = (cp << 6) | ((unsigned char)s[i] & 0x3F);
+    }
+    return cp;
 }
 
 const char* addslashes(const char* s) {
@@ -3715,7 +3736,7 @@ const char* addslashes(const char* s) {
     // Count how many chars need escaping
     size_t extra = 0;
     for (size_t i = 0; i < len; i++) {
-        if (s[i] == '\'' || s[i] == '"' || s[i] == '\\' || s[i] == '\0') extra++;
+        if (s[i] == '\'' || s[i] == '"' || s[i] == '\\') extra++;
     }
     char* r = malloc(len + extra + 1);
     if (!r) return strdup("");
@@ -3725,7 +3746,6 @@ const char* addslashes(const char* s) {
             case '\'': r[j++] = '\\'; r[j++] = '\''; break;
             case '"':  r[j++] = '\\'; r[j++] = '"'; break;
             case '\\': r[j++] = '\\'; r[j++] = '\\'; break;
-            case '\0': r[j++] = '\\'; r[j++] = '0'; break;
             default:   r[j++] = s[i]; break;
         }
     }
@@ -3837,11 +3857,36 @@ const char* pathinfo(const char* path) {
         extension[0] = '\0';
     }
 
-    char* result = malloc(2048);
+    // JSON-escape each component
+    char esc_dirname[2048] = "";
+    char esc_basename[512] = "";
+    char esc_filename[512] = "";
+    char esc_extension[128] = "";
+    const char* srcs[] = { dirname, basename, filename, extension };
+    char* dsts[] = { esc_dirname, esc_basename, esc_filename, esc_extension };
+    size_t dstsz[] = { sizeof(esc_dirname), sizeof(esc_basename), sizeof(esc_filename), sizeof(esc_extension) };
+    for (int k = 0; k < 4; k++) {
+        const char* s = srcs[k];
+        char* d = dsts[k];
+        size_t j = 0, mx = dstsz[k] - 1;
+        for (size_t i = 0; s[i] && j < mx - 1; i++) {
+            switch (s[i]) {
+                case '"':  if (j+1<mx) { d[j++]='\\'; d[j++]='"'; } break;
+                case '\\': if (j+1<mx) { d[j++]='\\'; d[j++]='\\'; } break;
+                case '\n': if (j+1<mx) { d[j++]='\\'; d[j++]='n'; } break;
+                case '\r': if (j+1<mx) { d[j++]='\\'; d[j++]='r'; } break;
+                case '\t': if (j+1<mx) { d[j++]='\\'; d[j++]='t'; } break;
+                default:   d[j++] = s[i]; break;
+            }
+        }
+        d[j] = '\0';
+    }
+
+    char* result = malloc(4096);
     if (!result) return strdup("{}");
-    snprintf(result, 2048,
+    snprintf(result, 4096,
         "{\"dirname\":\"%s\",\"basename\":\"%s\",\"extension\":\"%s\",\"filename\":\"%s\"}",
-        dirname, basename, extension, filename);
+        esc_dirname, esc_basename, esc_extension, esc_filename);
     return result;
 }
 
@@ -3855,24 +3900,38 @@ bool move_uploaded_file(const char* tmp, const char* dest) {
 
 // ---- Security functions ----
 
+// Cross-platform secure random bytes helper. Returns 1 on success, 0 on failure.
+static int phprs_secure_random(void* buf, size_t len) {
+#ifdef _WIN32
+    // Use RtlGenRandom (SystemFunction036) available since Windows XP
+    typedef BOOLEAN (APIENTRY *RtlGenRandomFn)(PVOID, ULONG);
+    HMODULE hLib = LoadLibraryA("advapi32.dll");
+    if (hLib) {
+        RtlGenRandomFn fn = (RtlGenRandomFn)GetProcAddress(hLib, "SystemFunction036");
+        if (fn && fn(buf, (ULONG)len)) { FreeLibrary(hLib); return 1; }
+        FreeLibrary(hLib);
+    }
+    return 0;
+#else
+    FILE* f = fopen("/dev/urandom", "rb");
+    if (f) {
+        size_t rd = fread(buf, 1, len, f);
+        fclose(f);
+        if (rd == len) return 1;
+    }
+    return 0;
+#endif
+}
+
 const char* random_bytes(int64_t length) {
     if (length < 1) length = 1;
     if (length > 1024 * 1024) length = 1024 * 1024;
     size_t n = (size_t)length;
     unsigned char* buf = malloc(n);
     if (!buf) return strdup("");
-    FILE* f = fopen("/dev/urandom", "rb");
-    if (f) {
-        size_t rd = fread(buf, 1, n, f);
-        fclose(f);
-        if (rd < n) {
-            // fallback on partial read
-            for (size_t i = rd; i < n; i++) buf[i] = (unsigned char)(time(NULL) ^ i);
-        }
-    } else {
-        // fallback
-        int64_t t = (int64_t)time(NULL);
-        for (size_t i = 0; i < n; i++) buf[i] = (unsigned char)((t >> ((i % 8) * 8)) & 0xFF);
+    if (!phprs_secure_random(buf, n)) {
+        free(buf);
+        return strdup("");
     }
     char* hex = malloc(n * 2 + 1);
     if (!hex) { free(buf); return strdup(""); }
@@ -3886,22 +3945,20 @@ const char* random_bytes(int64_t length) {
 
 int64_t random_int(int64_t min, int64_t max) {
     if (min > max) return min;
-    uint64_t val = 0;
-    FILE* f = fopen("/dev/urandom", "rb");
-    if (f) {
-        size_t rd = fread(&val, 1, sizeof(val), f);
-        fclose(f);
-        if (rd < sizeof(val)) val = (uint64_t)time(NULL);
-    } else {
-        val = (uint64_t)time(NULL);
-    }
     uint64_t range = (uint64_t)(max - min);
     if (range == 0) return min;
+    uint64_t threshold = UINT64_MAX - (UINT64_MAX % (range + 1));
+    uint64_t val = 0;
+    int attempts = 0;
+    do {
+        if (!phprs_secure_random(&val, sizeof(val))) {
+            val = (uint64_t)time(NULL) ^ (uint64_t)attempts;
+            break;
+        }
+        attempts++;
+    } while (val >= threshold && attempts < 128);
     return min + (int64_t)(val % (range + 1));
 }
-
-// Forward declare the internal SHA-1 raw function (defined later in this file)
-static void phprs_sha1(const unsigned char* input, size_t len, unsigned char output[20]);
 
 const char* password_hash(const char* password, const char* algo) {
     if (!password) password = "";
@@ -3909,26 +3966,17 @@ const char* password_hash(const char* password, const char* algo) {
 
     // Generate 16-byte random salt
     unsigned char salt_bytes[16];
-    FILE* f = fopen("/dev/urandom", "rb");
-    if (f) {
-        size_t rd = fread(salt_bytes, 1, 16, f);
-        fclose(f);
-        if (rd < 16) {
-            int64_t t = (int64_t)time(NULL);
-            for (int i = (int)rd; i < 16; i++) salt_bytes[i] = (unsigned char)((t >> ((i % 8) * 8)) & 0xFF);
-        }
-    } else {
-        int64_t t = (int64_t)time(NULL);
-        for (int i = 0; i < 16; i++) salt_bytes[i] = (unsigned char)((t >> ((i % 8) * 8)) & 0xFF);
+    if (!phprs_secure_random(salt_bytes, 16)) {
+        return strdup("");
     }
     char salt_hex[33];
     for (int i = 0; i < 16; i++) snprintf(salt_hex + i * 2, 3, "%02x", salt_bytes[i]);
     salt_hex[32] = '\0';
 
-    // Determine algorithm string
+    // Determine algorithm string — only sha1 is supported
     const char* algo_str = algo;
     if (!algo_str || algo_str[0] == '\0') algo_str = "sha1";
-    if (strcmp(algo_str, "bcrypt") != 0 && strcmp(algo_str, "sha256") != 0 && strcmp(algo_str, "sha1") != 0) {
+    if (strcmp(algo_str, "sha1") != 0) {
         algo_str = "sha1";
     }
 
@@ -3944,20 +3992,21 @@ const char* password_hash(const char* password, const char* algo) {
     free(initial);
 
     for (int iter = 0; iter < 9999; iter++) {
-        unsigned char combined[20 + 1024]; // hash + password
+        unsigned char* combined = malloc(20 + pwlen);
+        if (!combined) return strdup("");
         memcpy(combined, hash, 20);
-        size_t pw_copy = pwlen;
-        if (pw_copy > 1024) pw_copy = 1024;
-        memcpy(combined + 20, password, pw_copy);
-        phprs_sha1(combined, 20 + pw_copy, hash);
+        memcpy(combined + 20, password, pwlen);
+        phprs_sha1(combined, 20 + pwlen, hash);
+        free(combined);
     }
     char hash_hex[41];
     for (int i = 0; i < 20; i++) snprintf(hash_hex + i * 2, 3, "%02x", hash[i]);
     hash_hex[40] = '\0';
 
-    char* result = malloc(strlen(algo_str) + 1 + 32 + 1 + 40 + 1);
+    size_t result_len = strlen(algo_str) + 1 + 32 + 1 + 40 + 1;
+    char* result = malloc(result_len);
     if (!result) return strdup("");
-    snprintf(result, 1024, "%s$%s$%s", algo_str, salt_hex, hash_hex);
+    snprintf(result, result_len, "%s$%s$%s", algo_str, salt_hex, hash_hex);
     return result;
 }
 
@@ -3990,12 +4039,12 @@ bool password_verify(const char* password, const char* stored_hash) {
     free(initial);
 
     for (int iter = 0; iter < 9999; iter++) {
-        unsigned char combined[20 + 1024];
+        unsigned char* combined = malloc(20 + pwlen);
+        if (!combined) return false;
         memcpy(combined, hash, 20);
-        size_t pw_copy = pwlen;
-        if (pw_copy > 1024) pw_copy = 1024;
-        memcpy(combined + 20, password, pw_copy);
-        phprs_sha1(combined, 20 + pw_copy, hash);
+        memcpy(combined + 20, password, pwlen);
+        phprs_sha1(combined, 20 + pwlen, hash);
+        free(combined);
     }
     char computed_hex[41];
     for (int i = 0; i < 20; i++) snprintf(computed_hex + i * 2, 3, "%02x", hash[i]);
@@ -4088,4 +4137,193 @@ int64_t phprs_cors_is_preflight(const char* raw) {
     if (!raw) return 0;
     // Check if first line starts with "OPTIONS "
     return (strncmp(raw, "OPTIONS ", 8) == 0) ? 1 : 0;
+}
+
+// ---- Batch 2: Type Casting ----
+
+int64_t intval(const char* s, int64_t base) {
+    if (!s || !*s) return 0;
+    while (*s == ' ' || *s == '\t' || *s == '\n' || *s == '\r') s++;
+    if (base == 10) {
+        return (int64_t)strtoll(s, NULL, 10);
+    }
+    const char* p = s;
+    if (base == 16 && (p[0] == '0' && (p[1] == 'x' || p[1] == 'X'))) p += 2;
+    return (int64_t)strtoll(p, NULL, (int)base);
+}
+
+double floatval(const char* s) {
+    if (!s || !*s) return 0.0;
+    return strtod(s, NULL);
+}
+
+const char* strval_fn(int64_t n) {
+    char* buf = malloc(32);
+    if (!buf) return strdup("");
+    snprintf(buf, 32, "%" PRId64, n);
+    return buf;
+}
+
+bool boolval(const char* s) {
+    if (!s) return false;
+    return s[0] != '\0' && !(s[0] == '0' && s[1] == '\0');
+}
+
+// ---- Batch 2: String Functions ----
+
+const char* str_pad(const char* input, int64_t length, const char* pad, int64_t pad_type) {
+    if (!input) input = "";
+    if (!pad || !*pad) pad = " ";
+    size_t input_len = strlen(input);
+    if ((int64_t)input_len >= length) return strdup(input);
+    size_t pad_needed = (size_t)(length - (int64_t)input_len);
+    size_t pad_str_len = strlen(pad);
+    char* padding = malloc(pad_needed + 1);
+    if (!padding) return strdup(input);
+    for (size_t i = 0; i < pad_needed; i++) padding[i] = pad[i % pad_str_len];
+    padding[pad_needed] = '\0';
+
+    size_t total = input_len + pad_needed + 1;
+    char* result = malloc(total);
+    if (!result) { free(padding); return strdup(input); }
+
+    if (pad_type == 1) { // STR_PAD_LEFT
+        memcpy(result, padding, pad_needed);
+        memcpy(result + pad_needed, input, input_len);
+    } else if (pad_type == 2) { // STR_PAD_BOTH
+        size_t left = pad_needed / 2;
+        size_t right = pad_needed - left;
+        memcpy(result, padding, left);
+        memcpy(result + left, input, input_len);
+        memcpy(result + left + input_len, padding, right);
+    } else { // STR_PAD_RIGHT
+        memcpy(result, input, input_len);
+        memcpy(result + input_len, padding, pad_needed);
+    }
+    result[total - 1] = '\0';
+    free(padding);
+    return result;
+}
+
+const char* wordwrap(const char* str, int64_t width, const char* brk, bool cut_long) {
+    if (!str) return strdup("");
+    if (!brk) brk = "\n";
+    if (width <= 0) width = 75;
+    size_t slen = strlen(str);
+    size_t blen = strlen(brk);
+    size_t alloc = slen * 2 + blen * (slen / (size_t)width + 1) + 1;
+    char* result = malloc(alloc);
+    if (!result) return strdup(str);
+    size_t ri = 0, line_len = 0, i = 0;
+    while (i < slen) {
+        if (str[i] == ' ') {
+            // Find next word length
+            size_t wstart = i + 1;
+            size_t wend = wstart;
+            while (wend < slen && str[wend] != ' ') wend++;
+            size_t wlen = wend - wstart;
+            if (line_len + 1 + wlen > (size_t)width && line_len > 0) {
+                memcpy(result + ri, brk, blen); ri += blen;
+                line_len = 0;
+            } else {
+                result[ri++] = ' '; line_len++;
+            }
+            i++;
+        } else {
+            if (cut_long && line_len >= (size_t)width) {
+                memcpy(result + ri, brk, blen); ri += blen;
+                line_len = 0;
+            }
+            result[ri++] = str[i++]; line_len++;
+        }
+    }
+    result[ri] = '\0';
+    return result;
+}
+
+int64_t str_word_count(const char* s) {
+    if (!s || !*s) return 0;
+    int64_t count = 0;
+    bool in_word = false;
+    for (; *s; s++) {
+        if (*s == ' ' || *s == '\t' || *s == '\n' || *s == '\r') {
+            in_word = false;
+        } else if (!in_word) {
+            in_word = true;
+            count++;
+        }
+    }
+    return count;
+}
+
+const char* chunk_split(const char* body, int64_t chunklen, const char* end) {
+    if (!body) return strdup("");
+    if (!end) end = "\r\n";
+    if (chunklen < 1) chunklen = 76;
+    size_t blen = strlen(body);
+    size_t elen = strlen(end);
+    size_t chunks = (blen + (size_t)chunklen - 1) / (size_t)chunklen;
+    char* result = malloc(blen + chunks * elen + 1);
+    if (!result) return strdup(body);
+    size_t ri = 0, i = 0;
+    while (i < blen) {
+        size_t take = (size_t)chunklen;
+        if (i + take > blen) take = blen - i;
+        memcpy(result + ri, body + i, take); ri += take; i += take;
+        memcpy(result + ri, end, elen); ri += elen;
+    }
+    result[ri] = '\0';
+    return result;
+}
+
+// ---- Batch 2: Array Functions (C stubs — arrays in compiled mode are handled by codegen) ----
+
+// array_splice, array_pad, array_key_first, array_key_last, array_is_list
+// These operate on PHPRS's JSON-encoded array representation in compiled mode.
+
+// ---- Batch 2: Math/Date ----
+
+double fmod_(double x, double y) {
+    return fmod(x, y);
+}
+
+int64_t intdiv(int64_t a, int64_t b) {
+    if (b == 0) return 0;
+    return a / b;
+}
+
+bool checkdate(int64_t month, int64_t day, int64_t year) {
+    if (year < 1 || year > 32767 || month < 1 || month > 12 || day < 1) return false;
+    int days_in_month[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    if ((year % 4 == 0 && year % 100 != 0) || year % 400 == 0) days_in_month[1] = 29;
+    return day <= days_in_month[month - 1];
+}
+
+int64_t mktime_(int64_t hour, int64_t min, int64_t sec, int64_t month, int64_t day, int64_t year) {
+    struct tm t;
+    memset(&t, 0, sizeof(t));
+    t.tm_year = (int)(year - 1900);
+    t.tm_mon = (int)(month - 1);
+    t.tm_mday = (int)day;
+    t.tm_hour = (int)hour;
+    t.tm_min = (int)min;
+    t.tm_sec = (int)sec;
+    t.tm_isdst = -1;
+    time_t result = mktime(&t);
+    return (int64_t)result;
+}
+
+// str_starts_with / str_ends_with
+bool str_starts_with(const char* haystack, const char* needle) {
+    if (!haystack || !needle) return false;
+    size_t nlen = strlen(needle);
+    return strncmp(haystack, needle, nlen) == 0;
+}
+
+bool str_ends_with(const char* haystack, const char* needle) {
+    if (!haystack || !needle) return false;
+    size_t hlen = strlen(haystack);
+    size_t nlen = strlen(needle);
+    if (nlen > hlen) return false;
+    return strcmp(haystack + hlen - nlen, needle) == 0;
 }

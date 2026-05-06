@@ -33,7 +33,7 @@ function request_param(string $params, string $key): string {
             }
         }
     }
-    return $found;
+    return phprs_url_decode($found);
 }
 
 // ---- $_SERVER equivalent ----
@@ -43,7 +43,7 @@ function request_param(string $params, string $key): string {
 // Keys: REQUEST_METHOD, REQUEST_URI, QUERY_STRING, HTTP_HOST,
 //       HTTP_USER_AGENT, HTTP_ACCEPT, SERVER_PORT, REMOTE_ADDR,
 //       REQUEST_TIME, CONTENT_TYPE, CONTENT_LENGTH, HTTP_REFERER
-function request_server(string $raw, int $port): string {
+function request_server(string $raw, int $port, int $client_fd): string {
     let $method = phprs_http_method($raw);
     let $full_path = phprs_http_path($raw);
     let $host = phprs_http_header($raw, "Host");
@@ -69,7 +69,7 @@ function request_server(string $raw, int $port): string {
     $result = $result . "&HTTP_USER_AGENT=" . $ua;
     $result = $result . "&HTTP_ACCEPT=" . $accept;
     $result = $result . "&SERVER_PORT=" . $port;
-    $result = $result . "&REMOTE_ADDR=127.0.0.1";
+    $result = $result . "&REMOTE_ADDR=" . phprs_client_ip($client_fd);
     $result = $result . "&REQUEST_TIME=" . $ts;
     if ($ct != "") { $result = $result . "&CONTENT_TYPE=" . $ct; }
     if ($cl != "") { $result = $result . "&CONTENT_LENGTH=" . $cl; }
@@ -121,6 +121,8 @@ function cookie_param(string $raw, string $key): string {
 }
 
 // ---- $_FILES stub — multipart file upload parsing ----
+// NOTE: Multipart form-data parsing is not yet implemented.
+// For file uploads, use the raw body approach (see api_upload in home_controller).
 // Returns "" (not yet implemented).
 function request_files(string $raw): string {
     let $_ = $raw;
@@ -182,8 +184,8 @@ function session_start(string $raw): string {
         if (session_valid_id($id) == 0) { $id = ""; }
     }
     if ($id == "") {
-        // Generate session ID: md5(uniqid + microtime)
-        $id = "sess_" . md5(uniqid("") . microtime());
+        // Generate session ID using cryptographic random bytes
+        $id = "sess_" . md5(random_bytes(32));
     }
     return $id;
 }
@@ -242,7 +244,7 @@ function csrf_token(string $raw): string {
     let $sid = session_start($raw);
     let $token = session_get($sid, "_csrf_token");
     if ($token == "") {
-        $token = md5(uniqid("csrf_") . microtime() . rand(0, 999999));
+        $token = md5(random_bytes(32));
         session_set($sid, "_csrf_token", $token);
     }
     return $token;

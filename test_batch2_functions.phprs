@@ -1,0 +1,136 @@
+<?phprs
+echo "=== Type Casting Functions ===\n";
+
+let $i = intval("42");
+echo "intval('42') = " . $i . " (expected: 42)\n";
+
+let $i2 = intval("0xFF", 16);
+echo "intval('0xFF', 16) = " . $i2 . " (expected: 255)\n";
+
+let $f = floatval("3.14");
+echo "floatval('3.14') = " . $f . " (expected: 3.14)\n";
+
+let $s = strval(123);
+echo "strval(123) = '" . $s . "' (expected: '123')\n";
+
+let $b = boolval("");
+if ($b == false) {
+    echo "boolval('') = false (PASS)\n";
+} else {
+    echo "boolval('') = true (FAIL)\n";
+}
+
+let $b2 = boolval("hello");
+if ($b2 == true) {
+    echo "boolval('hello') = true (PASS)\n";
+} else {
+    echo "boolval('hello') = false (FAIL)\n";
+}
+
+echo "\n=== String Functions ===\n";
+
+let $padded = str_pad("42", 5, "0", 1);
+echo "str_pad('42', 5, '0', LEFT) = '" . $padded . "' (expected: '00042')\n";
+
+let $padded_r = str_pad("hi", 6, ".");
+echo "str_pad('hi', 6, '.') = '" . $padded_r . "' (expected: 'hi....')\n";
+
+let $padded_b = str_pad("hi", 8, "-+", 2);
+echo "str_pad('hi', 8, '-+', BOTH) = '" . $padded_b . "' (expected: '-+-hi-+-')\n";
+
+let $wrapped = wordwrap("The quick brown fox jumped over the lazy dog", 15, "\n", false);
+echo "wordwrap (15 chars):\n" . $wrapped . "\n";
+
+let $wc = str_word_count("Hello World how are you");
+echo "str_word_count = " . $wc . " (expected: 5)\n";
+
+let $chunked = chunk_split("abcdefgh", 3, "-");
+echo "chunk_split('abcdefgh', 3, '-') = '" . $chunked . "' (expected: 'abc-def-gh-')\n";
+
+echo "\n=== Array Functions ===\n";
+
+let $arr = [10, 20, 30, 40, 50];
+let $spliced = array_splice($arr, 1, 2);
+echo "array_splice([10..50], 1, 2) = " . json_encode($spliced) . " (expected: [20,30])\n";
+
+let $padded_arr = array_pad([1, 2, 3], 5, 0);
+echo "array_pad([1,2,3], 5, 0) = " . json_encode($padded_arr) . " (expected: [1,2,3,0,0])\n";
+
+let $padded_neg = array_pad([1, 2, 3], -5, 0);
+echo "array_pad([1,2,3], -5, 0) = " . json_encode($padded_neg) . " (expected: [0,0,1,2,3])\n";
+
+let $first = array_key_first([10, 20, 30]);
+echo "array_key_first([10,20,30]) = " . $first . " (expected: 0)\n";
+
+let $last = array_key_last([10, 20, 30]);
+echo "array_key_last([10,20,30]) = " . $last . " (expected: 2)\n";
+
+let $is_list = array_is_list([1, 2, 3]);
+if ($is_list == true) {
+    echo "array_is_list([1,2,3]) = true (PASS)\n";
+} else {
+    echo "array_is_list([1,2,3]) = false (FAIL)\n";
+}
+
+let $is_list2 = array_is_list(["a" => 1]);
+if ($is_list2 == false) {
+    echo "array_is_list({'a'=>1}) = false (PASS)\n";
+} else {
+    echo "array_is_list({'a'=>1}) = true (FAIL)\n";
+}
+
+echo "\n=== Math/Date Functions ===\n";
+
+let $fm = fmod(10.5, 3.2);
+echo "fmod(10.5, 3.2) = " . $fm . " (expected: ~0.9)\n";
+
+let $id = intdiv(7, 2);
+echo "intdiv(7, 2) = " . $id . " (expected: 3)\n";
+
+let $valid = checkdate(2, 29, 2024);
+if ($valid == true) {
+    echo "checkdate(2, 29, 2024) = true (PASS, leap year)\n";
+} else {
+    echo "checkdate(2, 29, 2024) = false (FAIL)\n";
+}
+
+let $invalid = checkdate(2, 29, 2023);
+if ($invalid == false) {
+    echo "checkdate(2, 29, 2023) = false (PASS, not leap year)\n";
+} else {
+    echo "checkdate(2, 29, 2023) = true (FAIL)\n";
+}
+
+let $ts = mktime(0, 0, 0, 1, 1, 1970);
+echo "mktime(0,0,0,1,1,1970) = " . $ts . " (expected: 0)\n";
+
+let $ts2 = mktime(12, 0, 0, 6, 15, 2024);
+echo "mktime(12,0,0,6,15,2024) = " . $ts2 . " (expected: >0)\n";
+
+echo "\n=== Misc Functions ===\n";
+
+printf("printf test: %s = %d\n", "answer", 42);
+
+let $sw = str_starts_with("hello world", "hello");
+if ($sw == true) {
+    echo "str_starts_with('hello world', 'hello') = true (PASS)\n";
+} else {
+    echo "str_starts_with('hello world', 'hello') = false (FAIL)\n";
+}
+
+let $ew = str_ends_with("hello world", "world");
+if ($ew == true) {
+    echo "str_ends_with('hello world', 'world') = true (PASS)\n";
+} else {
+    echo "str_ends_with('hello world', 'world') = false (FAIL)\n";
+}
+
+let $sw2 = str_starts_with("hello", "xyz");
+if ($sw2 == false) {
+    echo "str_starts_with('hello', 'xyz') = false (PASS)\n";
+} else {
+    echo "str_starts_with('hello', 'xyz') = true (FAIL)\n";
+}
+
+echo "\n=== All Batch 2 Tests Complete ===\n";
+?>
