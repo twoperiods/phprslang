@@ -46,8 +46,7 @@ impl CTranspiler {
         // First collect all function signatures (regular + extern)
         for stmt in &program.stmts {
             match stmt {
-                Stmt::Function { name, params, return_type, .. }
-                | Stmt::ExternFunction { name, params, return_type } => {
+                Stmt::Function { name, params, return_type, .. } => {
                     let ret = return_type.as_ref()
                         .map(|t| ast_ty_to_c(t))
                         .unwrap_or("void");
@@ -58,6 +57,15 @@ impl CTranspiler {
                     self.emitln(&format!("{} {}({});", ret, name, p_str.join(", ")));
                     self.funcs.push(name.clone());
                     self.func_return_types.insert(name.clone(), ret.to_string());
+                }
+                Stmt::ExternFunction { name, params, return_type } => {
+                    // Extern functions are provided by the runtime — no forward declaration needed
+                    let ret = return_type.as_ref()
+                        .map(|t| ast_ty_to_c(t))
+                        .unwrap_or("void");
+                    self.funcs.push(name.clone());
+                    self.func_return_types.insert(name.clone(), ret.to_string());
+                    let _ = params; // suppress unused warning
                 }
                 _ => {}
             }
@@ -203,7 +211,64 @@ impl CTranspiler {
             ("printf", "void"),
             ("str_starts_with", "bool"),
             ("str_ends_with", "bool"),
-            ("phprs_client_ip", "string"),
+            ("phprs_client_ip", "const char*"),
+            // Thread pool + app state
+            ("phprs_thread_pool_init", "int64_t"),
+            ("phprs_thread_pool_enqueue", "int64_t"),
+            ("phprs_thread_pool_shutdown", "void"),
+            ("phprs_app_set_routes", "void"),
+            ("phprs_app_get_routes", "const char*"),
+            ("phprs_app_set_port", "void"),
+            ("phprs_app_get_port", "int64_t"),
+            ("phprs_str_is_alnum", "int64_t"),
+            // WebSocket
+            ("phprs_is_websocket_upgrade", "int64_t"),
+            ("phprs_ws_handshake_response", "const char*"),
+            ("phprs_ws_read_frame", "const char*"),
+            ("phprs_ws_write_frame", "int64_t"),
+            ("phprs_ws_close", "void"),
+            // Networking / HTTP
+            ("phprs_server_new", "int64_t"),
+            ("phprs_server_accept", "int64_t"),
+            ("phprs_socket_read", "const char*"),
+            ("phprs_socket_write", "int64_t"),
+            ("phprs_socket_close", "void"),
+            ("phprs_http_method", "const char*"),
+            ("phprs_http_path", "const char*"),
+            ("phprs_http_header", "const char*"),
+            ("phprs_http_body", "const char*"),
+            ("phprs_http_response", "const char*"),
+            ("phprs_url_decode", "const char*"),
+            ("phprs_request_parse", "const char*"),
+            ("phprs_file_read", "const char*"),
+            ("phprs_file_write", "int64_t"),
+            ("phprs_file_exists", "int64_t"),
+            // String helpers
+            ("phprs_str_replace", "const char*"),
+            ("phprs_str_split", "const char*"),
+            ("phprs_str_contains", "int64_t"),
+            ("phprs_str_starts_with", "int64_t"),
+            ("phprs_str_ends_with", "int64_t"),
+            ("phprs_str_upper", "const char*"),
+            ("phprs_str_lower", "const char*"),
+            // JSON
+            ("phprs_json_get_string", "const char*"),
+            ("phprs_json_get_int", "int64_t"),
+            // Curl
+            ("curl", "const char*"),
+            ("curl_async", "int64_t"),
+            ("curl_wait", "const char*"),
+            ("curl_is_done", "int64_t"),
+            // Threading
+            ("phprs_thread_spawn", "int64_t"),
+            // Rate limiting / CORS
+            ("phprs_rate_limit_init", "void"),
+            ("phprs_rate_limit_check", "int64_t"),
+            ("phprs_cors_set_config", "void"),
+            ("phprs_cors_get_origin", "const char*"),
+            ("phprs_cors_get_methods", "const char*"),
+            ("phprs_cors_get_headers", "const char*"),
+            ("phprs_cors_is_preflight", "int64_t"),
         ];
         for (name, ret) in builtins {
             if !self.func_return_types.contains_key(name) {

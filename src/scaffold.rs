@@ -213,6 +213,48 @@ function app_routes(): string {{
     return $R;
 }}
 
+// ------- Thread Pool Request Handler -------
+// Signature: string → string — auto-registered by codegen as a thread pool handler.
+// The thread pool worker calls this with the raw HTTP request, writes the response,
+// and closes the socket automatically.
+
+function handle_request(string $raw): string {{
+    let $routes = phprs_app_get_routes();
+    let $port = phprs_app_get_port();
+    let $client = 0;  // fd is managed by the thread pool worker
+
+    let $server = request_server($raw, $port, $client);
+    let $ip = server_param($server, "REMOTE_ADDR");
+
+    // --- Rate Limit ---
+    if (rate_limit_allow($ip) == 0) {{
+        let $cors = cors_headers();
+        let $resp = rate_limit_429_response();
+        if ($cors != "") {{
+            $resp = phprs_str_replace($resp, "\r\n\r\n", "\r\n" . $cors . "\r\n");
+        }}
+        return $resp;
+    }}
+
+    // --- CORS Preflight ---
+    if (cors_is_preflight($raw) == 1) {{
+        return cors_preflight_response();
+    }}
+
+    let $method = phprs_http_method($raw);
+    let $path = phprs_http_path($raw);
+
+    let $response = app_dispatch($method, $path, $raw, $routes, $port, $client);
+
+    // --- Inject CORS headers ---
+    let $cors_hdrs = cors_headers();
+    if ($cors_hdrs != "") {{
+        $response = phprs_str_replace($response, "\r\n\r\n", "\r\n" . $cors_hdrs . "\r\n");
+    }}
+
+    return $response;
+}}
+
 // ------- Main Server Loop -------
 
 function app_main(): void {{
@@ -232,9 +274,17 @@ function app_main(): void {{
 
     let $RT = app_routes();
 
+    // Store routes and port in C globals for thread pool handler access
+    phprs_app_set_routes($RT);
+    phprs_app_set_port($port);
+
+    // Initialize thread pool with 8 worker threads
+    phprs_thread_pool_init(8);
+
     echo "============================================\n";
     echo "  {0} - PHPRS MVC Application\n";
     echo "  Server: http://localhost:" . $port . "\n";
+    echo "  Workers: 8 threads\n";
     echo "  Press Ctrl+C to stop.\n";
     echo "============================================\n";
 
@@ -244,56 +294,30 @@ function app_main(): void {{
         if ($client >= 0) {{
             let $raw = phprs_socket_read($client, 65536);
             if ($raw != "") {{
-                let $server = request_server($raw, $port, $client);
-                let $ip = server_param($server, "REMOTE_ADDR");
-
-                // --- Rate Limit ---
-                if (rate_limit_allow($ip) == 0) {{
-                    let $cors = cors_headers();
-                    let $resp = rate_limit_429_response();
-                    if ($cors != "") {{
-                        $resp = phprs_str_replace($resp, "\r\n\r\n", "\r\n" . $cors . "\r\n");
-                    }}
-                    phprs_socket_write($client, $resp);
-                    phprs_socket_close($client);
-                    continue;
-                }}
-
-                // --- CORS Preflight ---
-                if (cors_is_preflight($raw) == 1) {{
-                    phprs_socket_write($client, cors_preflight_response());
-                    phprs_socket_close($client);
-                    continue;
-                }}
-
                 let $method = phprs_http_method($raw);
                 let $path = phprs_http_path($raw);
 
-                // --- WebSocket Upgrade ---
+                // --- WebSocket Upgrade (handled on main thread) ---
                 if (phprs_is_websocket_upgrade($raw) == 1) {{
                     ws_accept($raw, $client);
                     if (phprs_str_starts_with($path, "/ws/echo") == 1) {{
-                        phprs_thread_spawn("ws_handle_echo", $client);
+                        phprs_thread_spawn("ws_handle_echo", $client, "");
                     }} else {{
-                        phprs_thread_spawn("ws_handle_chat", $client);
+                        phprs_thread_spawn("ws_handle_chat", $client, "");
                     }}
                     continue;
                 }}
 
-                let $response = app_dispatch($method, $path, $raw, $RT, $port, $client);
-
-                // --- Inject CORS headers ---
-                let $cors_hdrs = cors_headers();
-                if ($cors_hdrs != "") {{
-                    $response = phprs_str_replace($response, "\r\n\r\n", "\r\n" . $cors_hdrs . "\r\n");
-                }}
-
-                phprs_socket_write($client, $response);
+                // Dispatch to thread pool — worker calls handle_request,
+                // writes response to socket, and closes it
+                phprs_thread_pool_enqueue("handle_request", $client, $raw);
+                continue;
             }}
             phprs_socket_close($client);
         }}
     }}
 
+    phprs_thread_pool_shutdown();
     phprs_socket_close($sock);
 }}
 
@@ -431,7 +455,19 @@ extern function random_bytes(int $length): string;
 extern function random_int(int $min, int $max): int;
 
 // ---- Threading ----
-extern function phprs_thread_spawn(string $func_name, int $arg): int;
+extern function phprs_thread_spawn(string $func_name, int $arg, string $raw): int;
+extern function phprs_thread_pool_init(int $num_threads): int;
+extern function phprs_thread_pool_enqueue(string $func_name, int $fd, string $data): int;
+extern function phprs_thread_pool_shutdown(): void;
+
+// ---- App State (thread-safe globals) ----
+extern function phprs_app_set_routes(string $routes): void;
+extern function phprs_app_get_routes(): string;
+extern function phprs_app_set_port(int $port): void;
+extern function phprs_app_get_port(): int;
+
+// ---- String Validation ----
+extern function phprs_str_is_alnum(string $s): int;
 
 // ---- Middleware ----
 extern function phprs_rate_limit_init(int $max_req, int $window_sec): void;

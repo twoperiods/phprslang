@@ -137,42 +137,8 @@ function request_files(string $raw): string {
 function session_valid_id(string $sid): int {
     if ($sid == "") { return 0; }
     if (strlen($sid) > 64) { return 0; }
-    // Whitelist: only [a-zA-Z0-9_-]
-    let $work = $sid;
-    $work = phprs_str_replace($work, "a", ""); $work = phprs_str_replace($work, "b", "");
-    $work = phprs_str_replace($work, "c", ""); $work = phprs_str_replace($work, "d", "");
-    $work = phprs_str_replace($work, "e", ""); $work = phprs_str_replace($work, "f", "");
-    $work = phprs_str_replace($work, "g", ""); $work = phprs_str_replace($work, "h", "");
-    $work = phprs_str_replace($work, "i", ""); $work = phprs_str_replace($work, "j", "");
-    $work = phprs_str_replace($work, "k", ""); $work = phprs_str_replace($work, "l", "");
-    $work = phprs_str_replace($work, "m", ""); $work = phprs_str_replace($work, "n", "");
-    $work = phprs_str_replace($work, "o", ""); $work = phprs_str_replace($work, "p", "");
-    $work = phprs_str_replace($work, "q", ""); $work = phprs_str_replace($work, "r", "");
-    $work = phprs_str_replace($work, "s", ""); $work = phprs_str_replace($work, "t", "");
-    $work = phprs_str_replace($work, "u", ""); $work = phprs_str_replace($work, "v", "");
-    $work = phprs_str_replace($work, "w", ""); $work = phprs_str_replace($work, "x", "");
-    $work = phprs_str_replace($work, "y", ""); $work = phprs_str_replace($work, "z", "");
-    $work = phprs_str_replace($work, "A", ""); $work = phprs_str_replace($work, "B", "");
-    $work = phprs_str_replace($work, "C", ""); $work = phprs_str_replace($work, "D", "");
-    $work = phprs_str_replace($work, "E", ""); $work = phprs_str_replace($work, "F", "");
-    $work = phprs_str_replace($work, "G", ""); $work = phprs_str_replace($work, "H", "");
-    $work = phprs_str_replace($work, "I", ""); $work = phprs_str_replace($work, "J", "");
-    $work = phprs_str_replace($work, "K", ""); $work = phprs_str_replace($work, "L", "");
-    $work = phprs_str_replace($work, "M", ""); $work = phprs_str_replace($work, "N", "");
-    $work = phprs_str_replace($work, "O", ""); $work = phprs_str_replace($work, "P", "");
-    $work = phprs_str_replace($work, "Q", ""); $work = phprs_str_replace($work, "R", "");
-    $work = phprs_str_replace($work, "S", ""); $work = phprs_str_replace($work, "T", "");
-    $work = phprs_str_replace($work, "U", ""); $work = phprs_str_replace($work, "V", "");
-    $work = phprs_str_replace($work, "W", ""); $work = phprs_str_replace($work, "X", "");
-    $work = phprs_str_replace($work, "Y", ""); $work = phprs_str_replace($work, "Z", "");
-    $work = phprs_str_replace($work, "0", ""); $work = phprs_str_replace($work, "1", "");
-    $work = phprs_str_replace($work, "2", ""); $work = phprs_str_replace($work, "3", "");
-    $work = phprs_str_replace($work, "4", ""); $work = phprs_str_replace($work, "5", "");
-    $work = phprs_str_replace($work, "6", ""); $work = phprs_str_replace($work, "7", "");
-    $work = phprs_str_replace($work, "8", ""); $work = phprs_str_replace($work, "9", "");
-    $work = phprs_str_replace($work, "_", ""); $work = phprs_str_replace($work, "-", "");
-    if ($work == "") { return 1; }
-    return 0;
+    // Whitelist: only [a-zA-Z0-9_-] — single O(N) pass via C runtime
+    return phprs_str_is_alnum($sid);
 }
 
 // Start/resume a session. Returns the session ID.

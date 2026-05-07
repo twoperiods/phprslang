@@ -37,6 +37,8 @@ int64_t count(int64_t* arr) {
     #include <sys/stat.h>
     #include <arpa/inet.h>
     #include <netinet/in.h>
+    #include <netdb.h>
+    #include <dirent.h>
     #include <fcntl.h>
     #include <openssl/ssl.h>
     #include <openssl/err.h>
@@ -53,6 +55,7 @@ int64_t count(int64_t* arr) {
 #include <setjmp.h>
 #include <time.h>
 #include <math.h>
+#include <ctype.h>
 
 #ifndef _WIN32
 typedef int BOOL;
@@ -172,14 +175,18 @@ int64_t phprs_server_new(int64_t port) {
         phprs_closesocket(sock);
         return -1;
     }
-    if (listen(sock, 10) == PHPRS_SOCKET_ERROR) {
+    if (listen(sock, 128) == PHPRS_SOCKET_ERROR) {
         phprs_closesocket(sock);
         return -1;
     }
     return (int64_t)sock;
 }
 
-static char phprs_last_client_ip[64] = "127.0.0.1";
+#ifdef _WIN32
+static __declspec(thread) char phprs_last_client_ip[64] = "127.0.0.1";
+#else
+static _Thread_local char phprs_last_client_ip[64] = "127.0.0.1";
+#endif
 
 int64_t phprs_server_accept(int64_t server_fd) {
     struct sockaddr_in client_addr;
@@ -231,8 +238,8 @@ int64_t phprs_socket_write(int64_t fd, const char* data) {
     if (!data) return -1;
     size_t len = strlen(data);
 
-    // Check for TLS context
-    phprs_tls_ctx* tls = phprs_tls_find(fd);
+    // Check for TLS context (fast path: skip lookup when no TLS connections)
+    phprs_tls_ctx* tls = (phprs_tls_count > 0) ? phprs_tls_find(fd) : NULL;
     if (tls) {
 #ifdef _WIN32
         unsigned char* enc = NULL;
@@ -1444,6 +1451,20 @@ int64_t phprs_str_starts_with(const char* s, const char* prefix) {
     return strncmp(s, prefix, prefix_len) == 0 ? 1 : 0;
 }
 
+// Check if string contains only [a-zA-Z0-9_-] characters.
+// Returns 1 if valid (or empty), 0 if any invalid char found.
+int64_t phprs_str_is_alnum(const char* s) {
+    if (!s) return 0;
+    for (const char* p = s; *p; p++) {
+        char c = *p;
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+              (c >= '0' && c <= '9') || c == '_' || c == '-')) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 int64_t phprs_str_ends_with(const char* s, const char* suffix) {
     if (!s || !suffix) return 0;
     size_t s_len = strlen(s);
@@ -2169,8 +2190,8 @@ int64_t phprs_tls_connect(const char* host, int64_t port) {
 const char* phprs_socket_read_all(int64_t fd) {
     if (fd < 0) return strdup("");
 
-    // Check for TLS context
-    phprs_tls_ctx* tls = phprs_tls_find(fd);
+    // Check for TLS context (fast path: skip lookup when no TLS connections)
+    phprs_tls_ctx* tls = (phprs_tls_count > 0) ? phprs_tls_find(fd) : NULL;
     if (tls) {
 #ifdef _WIN32
         // Schannel decryption loop — HTTP-aware
@@ -2516,10 +2537,14 @@ struct phprs_thread_arg {
     const char* func_name;
     int64_t client_fd;
     char* raw_request;  // owned copy for the thread
+    char client_ip[64]; // snapshot of client IP at enqueue time
 };
 
 static PHPRS_THREAD_RETURN phprs_thread_worker(void* arg) {
     struct phprs_thread_arg* ta = (struct phprs_thread_arg*)arg;
+    // Set thread-local client IP so handlers can read it
+    strncpy(phprs_last_client_ip, ta->client_ip, sizeof(phprs_last_client_ip) - 1);
+    phprs_last_client_ip[sizeof(phprs_last_client_ip) - 1] = '\0';
     phprs_handler_fn handler = phprs_lookup_handler(ta->func_name);
     if (handler) {
         const char* response = handler(ta->raw_request);
@@ -2534,12 +2559,15 @@ static PHPRS_THREAD_RETURN phprs_thread_worker(void* arg) {
 }
 
 int64_t phprs_thread_spawn(const char* func_name, int64_t client_fd, const char* raw_request) {
-    if (!func_name || !raw_request) return 0;
+    if (!func_name) return 0;
+    if (!raw_request) raw_request = "";
     struct phprs_thread_arg* ta = (struct phprs_thread_arg*)malloc(sizeof(struct phprs_thread_arg));
     if (!ta) return 0;
     ta->func_name = func_name;
     ta->client_fd = client_fd;
     ta->raw_request = strdup(raw_request);
+    strncpy(ta->client_ip, phprs_last_client_ip, sizeof(ta->client_ip) - 1);
+    ta->client_ip[sizeof(ta->client_ip) - 1] = '\0';
 #ifdef _WIN32
     HANDLE thread = (HANDLE)_beginthreadex(NULL, 0, phprs_thread_worker, ta, 0, NULL);
     if (thread) {
@@ -2561,7 +2589,7 @@ int64_t phprs_thread_spawn(const char* func_name, int64_t client_fd, const char*
 // ---- Thread Pool ----
 
 #define PHPRS_TP_MAX_THREADS 64
-#define PHPRS_TP_QUEUE_SIZE 256
+#define PHPRS_TP_QUEUE_SIZE 4096
 
 static struct {
     phprs_thread_t threads[PHPRS_TP_MAX_THREADS];
@@ -2616,6 +2644,9 @@ static PHPRS_THREAD_RETURN phprs_tp_worker(void* arg) {
 #endif
 
         if (ta) {
+            // Set thread-local client IP so handlers can read it
+            strncpy(phprs_last_client_ip, ta->client_ip, sizeof(phprs_last_client_ip) - 1);
+            phprs_last_client_ip[sizeof(phprs_last_client_ip) - 1] = '\0';
             phprs_handler_fn handler = phprs_lookup_handler(ta->func_name);
             if (handler) {
                 const char* response = handler(ta->raw_request);
@@ -2667,6 +2698,8 @@ int64_t phprs_thread_pool_enqueue(const char* func_name, int64_t client_fd, cons
     ta->func_name = func_name;
     ta->client_fd = client_fd;
     ta->raw_request = strdup(raw_request);
+    strncpy(ta->client_ip, phprs_last_client_ip, sizeof(ta->client_ip) - 1);
+    ta->client_ip[sizeof(ta->client_ip) - 1] = '\0';
 
 #ifdef _WIN32
     EnterCriticalSection(&phprs_tp.mutex);
@@ -4073,6 +4106,12 @@ typedef struct {
 static rate_limit_slot g_rate_slots[RATE_LIMIT_SLOTS];
 static int g_rate_max_requests = 100;
 static int g_rate_window_secs = 60;
+#ifdef _WIN32
+static CRITICAL_SECTION g_rate_mutex;
+static BOOL g_rate_mutex_init = FALSE;
+#else
+static pthread_mutex_t g_rate_mutex = PTHREAD_MUTEX_INITIALIZER;
+#endif
 
 static unsigned rate_limit_hash(const char* ip) {
     unsigned h = 5381;
@@ -4091,6 +4130,13 @@ void phprs_rate_limit_init(int64_t max_req, int64_t window_sec) {
 int64_t phprs_rate_limit_check(const char* ip) {
     if (!ip || !*ip) return 0;
 
+#ifdef _WIN32
+    if (!g_rate_mutex_init) { InitializeCriticalSection(&g_rate_mutex); g_rate_mutex_init = TRUE; }
+    EnterCriticalSection(&g_rate_mutex);
+#else
+    pthread_mutex_lock(&g_rate_mutex);
+#endif
+
     unsigned slot = rate_limit_hash(ip);
     int64_t now = (int64_t)time(NULL);
 
@@ -4105,7 +4151,15 @@ int64_t phprs_rate_limit_check(const char* ip) {
     }
 
     g_rate_slots[slot].count++;
-    return (g_rate_slots[slot].count <= g_rate_max_requests) ? 1 : 0;
+    int64_t result = (g_rate_slots[slot].count <= g_rate_max_requests) ? 1 : 0;
+
+#ifdef _WIN32
+    LeaveCriticalSection(&g_rate_mutex);
+#else
+    pthread_mutex_unlock(&g_rate_mutex);
+#endif
+
+    return result;
 }
 
 // ---- CORS ----
@@ -4137,6 +4191,39 @@ int64_t phprs_cors_is_preflight(const char* raw) {
     if (!raw) return 0;
     // Check if first line starts with "OPTIONS "
     return (strncmp(raw, "OPTIONS ", 8) == 0) ? 1 : 0;
+}
+
+// ---- App State (thread-safe globals for handler access) ----
+
+static char* g_app_routes = NULL;
+static int64_t g_app_port = 0;
+#ifndef _WIN32
+static pthread_mutex_t g_app_state_mu = PTHREAD_MUTEX_INITIALIZER;
+#endif
+
+void phprs_app_set_routes(const char* routes) {
+    if (!routes) return;
+#ifndef _WIN32
+    pthread_mutex_lock(&g_app_state_mu);
+#endif
+    if (g_app_routes) free(g_app_routes);
+    g_app_routes = strdup(routes);
+#ifndef _WIN32
+    pthread_mutex_unlock(&g_app_state_mu);
+#endif
+}
+
+const char* phprs_app_get_routes(void) {
+    if (!g_app_routes) return "";
+    return g_app_routes;
+}
+
+void phprs_app_set_port(int64_t port) {
+    g_app_port = port;
+}
+
+int64_t phprs_app_get_port(void) {
+    return g_app_port;
 }
 
 // ---- Batch 2: Type Casting ----

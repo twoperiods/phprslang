@@ -2522,6 +2522,22 @@ impl Interpreter {
             "phprs_mutex_lock" => Ok(Value::Null),
             "phprs_mutex_unlock" => Ok(Value::Null),
             "phprs_client_ip" => Ok(Value::String_("127.0.0.1".to_string())),
+            // ---- App State (no-op in interpreter — routes/port are local vars) ----
+            "phprs_app_set_routes" => Ok(Value::Null),
+            "phprs_app_get_routes" => Ok(Value::String_("".to_string())),
+            "phprs_app_set_port" => Ok(Value::Null),
+            "phprs_app_get_port" => Ok(Value::Int(0)),
+            // ---- String Validation ----
+            "phprs_str_is_alnum" => {
+                if args.len() != 1 { return Err("phprs_str_is_alnum() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::String_(s) => {
+                        let valid = !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+                        Ok(Value::Int(if valid { 1 } else { 0 }))
+                    }
+                    _ => Ok(Value::Int(0)),
+                }
+            }
             // ---- Rate Limiting ----
             "phprs_rate_limit_init" => {
                 // no-op in interpreter
@@ -4366,6 +4382,10 @@ impl Interpreter {
             // Threading (no-op in interpreter)
             | "phprs_thread_spawn" | "phprs_mutex_new" | "phprs_mutex_lock" | "phprs_mutex_unlock"
             | "phprs_thread_pool_init" | "phprs_thread_pool_enqueue" | "phprs_thread_pool_shutdown"
+            // App state (no-op in interpreter)
+            | "phprs_app_set_routes" | "phprs_app_get_routes" | "phprs_app_set_port" | "phprs_app_get_port"
+            // String validation
+            | "phprs_str_is_alnum"
             // Rate limiting + CORS
             | "phprs_rate_limit_init" | "phprs_rate_limit_check"
             | "phprs_cors_set_config" | "phprs_cors_get_origin" | "phprs_cors_get_methods" | "phprs_cors_get_headers"

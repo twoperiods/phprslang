@@ -62,6 +62,17 @@ impl TypeEnv {
         env.funcs.insert("printf".into(), (vec![Ty::String], Ty::Void));
         env.funcs.insert("str_starts_with".into(), (vec![Ty::String, Ty::String], Ty::Bool));
         env.funcs.insert("str_ends_with".into(), (vec![Ty::String, Ty::String], Ty::Bool));
+        // Thread pool
+        env.funcs.insert("phprs_thread_pool_init".into(), (vec![Ty::Int], Ty::Int));
+        env.funcs.insert("phprs_thread_pool_enqueue".into(), (vec![Ty::String, Ty::Int, Ty::String], Ty::Int));
+        env.funcs.insert("phprs_thread_pool_shutdown".into(), (vec![], Ty::Void));
+        // App state
+        env.funcs.insert("phprs_app_set_routes".into(), (vec![Ty::String], Ty::Void));
+        env.funcs.insert("phprs_app_get_routes".into(), (vec![], Ty::String));
+        env.funcs.insert("phprs_app_set_port".into(), (vec![Ty::Int], Ty::Void));
+        env.funcs.insert("phprs_app_get_port".into(), (vec![], Ty::Int));
+        // String validation
+        env.funcs.insert("phprs_str_is_alnum".into(), (vec![Ty::String], Ty::Int));
         env
     }
 

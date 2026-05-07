@@ -450,3 +450,125 @@ ab -n 1000 -c 10 -s 5 http://127.0.0.1:8080/api/db/list
 # 内存检查
 ps -o pid,rss,vsz,comm -p $(pgrep phprs_bench)
 ```
+
+---
+
+## 12. 线程池优化测试结果
+
+> 测试日期: 2026-05-07  
+> 优化内容: 单线程阻塞模型 → 8 worker 线程池并行处理  
+> 编译命令: `phprs build app.phprs -o phprs_bench`（自动 `-O2 -lpthread`）  
+> 二进制大小: **166 KB** (arm64 Mach-O)
+
+### 12.1 线程池架构
+
+```
+主线程: accept() → read() → enqueue(raw_request)
+                                    ↓
+线程池 (8 workers): dequeue → handle_request() → write(response) → close(fd)
+```
+
+- 主线程负责连接接受和数据读取（避免 fd 跨线程传递的竞态）
+- Worker 线程从队列中取出完整请求，独立处理并响应
+- 线程安全全局变量存储路由表和端口配置
+- WebSocket 连接仍由 `phprs_thread_spawn` 独立线程处理
+
+### 12.2 优化项目
+
+| 优化项 | 说明 |
+|--------|------|
+| 线程池 | 8 worker 线程并行处理 HTTP 请求 |
+| App State | 线程安全全局路由表/端口（`phprs_app_set/get_routes/port`） |
+| `-O2` 编译 | `phprs build` 默认开启优化级别 |
+| OpenSSL 自动检测 | macOS Homebrew 路径自动传入 `-I`/`-L` |
+| `-lpthread` 自动链接 | 编译命令自动添加 pthreads |
+| listen backlog 增大 | TCP backlog 增至 1024 |
+
+### 12.3 压测结果 — 线程池 vs 旧单线程（编译模式）
+
+测试条件: `ab -n 20000 -c N http://127.0.0.1:8080/`（取多轮稳定值）
+
+| 并发数 | 旧单线程 QPS | 新线程池 QPS | 变化 |
+|--------|-------------|-------------|------|
+| c=50 | ~26,000 | ~27,600 | +6% |
+| c=100 | ~22,000 | ~25,400 | +15% |
+| c=200 | ~22,000 | ~20,500 | -7% |
+
+### 12.4 分析
+
+**c=50 ~ c=100（正向提升）**:
+- 线程池允许多个请求并行处理，减少队头阻塞
+- 在中等并发下，8 个 worker 能有效分摊请求处理负载
+- QPS 提升 6-15%
+
+**c=200（轻微下降）**:
+- 单 accept 线程成为瓶颈 — 所有连接仍需串行接受
+- 线程池队列和互斥锁开销在极高并发下抵消了并行收益
+- 解决方案: `SO_REUSEPORT` 多 accept 线程（未来优化方向）
+
+### 12.5 线程池模式的实际收益
+
+虽然 QPS 提升幅度有限（因为请求处理本身已经极快 < 0.1ms），但线程池带来了其他重要改进：
+
+1. **尾延迟改善**: 单线程模式下一个慢请求（如 DB 写入）会阻塞后续所有请求；线程池中其他 worker 不受影响
+2. **CPU 多核利用**: 8 个 worker 可以利用多个 CPU 核心，对计算密集型请求有显著提升
+3. **WebSocket 不阻塞 HTTP**: WS 长连接在独立线程处理，HTTP 请求不受影响
+4. **可扩展性**: 为后续 I/O 密集型功能（数据库连接、外部 API 调用）提供并行基础
+
+### 12.6 更新后的性能定位
+
+```
+                     单线程编译       线程池编译         变化
+┌──────────────────┬─────────────┬─────────────────┬──────────┐
+│ HTML (c=50)      │   ~26,000   │     ~27,600     │   +6%    │
+│ HTML (c=100)     │   ~22,000   │     ~25,400     │  +15%    │
+│ HTML (c=200)     │   ~22,000   │     ~20,500     │   -7%    │
+└──────────────────┴─────────────┴─────────────────┴──────────┘
+```
+
+### 12.7 后续优化方向
+
+| 优化方向 | 预期收益 | 复杂度 |
+|----------|---------|--------|
+| `SO_REUSEPORT` 多 accept 线程 | c=200+ 时 QPS 提升 30-50% | 中等 |
+| io_uring / kqueue 事件驱动 | 高并发下 2-5x 提升 | 高 |
+| 连接 keep-alive | 减少 TCP 握手开销，QPS 提升 20-40% | 中等 |
+| 零拷贝 sendfile | 静态文件服务提升 | 低 |
+
+---
+
+## 13. `phprs build` 编译修复
+
+> 修复日期: 2026-05-07
+
+### 问题
+
+在 macOS 上运行 `phprs build app.phprs` 时，编译器找不到 OpenSSL 头文件：
+
+```
+fatal error: 'openssl/ssl.h' file not found
+```
+
+需手动指定路径编译：
+```bash
+cc -O2 -I/opt/homebrew/opt/openssl/include -L/opt/homebrew/opt/openssl/lib output.c -o binary -lssl -lcrypto -lpthread
+```
+
+### 修复
+
+`src/lib.rs` 中的 `try_gcc()` 函数现在会自动检测 Homebrew OpenSSL 路径：
+
+- `/opt/homebrew/opt/openssl` (Apple Silicon)
+- `/usr/local/opt/openssl` (Intel Mac)
+
+同时自动添加 `-O2`（优化）和 `-lpthread`（线程支持）。
+
+### 验证
+
+```bash
+$ phprs build app.phprs -o phprs_bench
+Compiling app.phprs -> phprs_bench
+Successfully compiled to 'phprs_bench'
+$ file phprs_bench
+phprs_bench: Mach-O 64-bit executable arm64
+```

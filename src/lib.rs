@@ -107,13 +107,30 @@ fn try_gcc(c_path: &std::path::Path, output: &str) -> Result<(), String> {
                 cmd.arg(c_path)
                     .arg("-o")
                     .arg(output)
-                    .arg("-std=c11");
+                    .arg("-std=c11")
+                    .arg("-O2");
                 if cfg!(windows) {
                     // MinGW on Windows needs secur32 for Schannel SSPI
                     cmd.arg("-lsecur32").arg("-lcrypt32");
                 } else {
-                    // POSIX needs OpenSSL
-                    cmd.arg("-lssl").arg("-lcrypto");
+                    // POSIX needs OpenSSL + pthreads
+                    if cfg!(target_os = "macos") {
+                        // Homebrew OpenSSL isn't in default search paths
+                        let brew_paths = [
+                            "/opt/homebrew/opt/openssl",       // Apple Silicon
+                            "/usr/local/opt/openssl",          // Intel
+                        ];
+                        for prefix in &brew_paths {
+                            let inc = format!("{}/include", prefix);
+                            let lib = format!("{}/lib", prefix);
+                            if std::path::Path::new(&inc).exists() {
+                                cmd.arg(format!("-I{}", inc));
+                                cmd.arg(format!("-L{}", lib));
+                                break;
+                            }
+                        }
+                    }
+                    cmd.arg("-lssl").arg("-lcrypto").arg("-lpthread");
                 }
                 let status = cmd.status()
                     .map_err(|e| format!("Failed to run {}: {}", compiler, e))?;
