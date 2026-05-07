@@ -269,6 +269,17 @@ impl CTranspiler {
             ("phprs_cors_get_methods", "const char*"),
             ("phprs_cors_get_headers", "const char*"),
             ("phprs_cors_is_preflight", "int64_t"),
+            // Production infrastructure
+            ("phprs_config", "void"),
+            ("phprs_config_max_body", "void"),
+            ("phprs_config_timeout", "void"),
+            ("phprs_config_max_connections", "void"),
+            ("phprs_is_shutting_down", "int64_t"),
+            ("phprs_log", "void"),
+            ("phprs_log_error_msg", "void"),
+            ("phprs_log_init", "void"),
+            ("phprs_server_init_signals", "void"),
+            ("phprs_write_pidfile", "void"),
         ];
         for (name, ret) in builtins {
             if !self.func_return_types.contains_key(name) {

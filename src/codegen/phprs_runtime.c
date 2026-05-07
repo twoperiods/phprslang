@@ -56,6 +56,11 @@ int64_t count(int64_t* arr) {
 #include <time.h>
 #include <math.h>
 #include <ctype.h>
+#include <signal.h>
+#ifndef _WIN32
+#include <sys/time.h>
+#include <netinet/tcp.h>
+#endif
 
 #ifndef _WIN32
 typedef int BOOL;
@@ -149,12 +154,47 @@ static void phprs_tls_remove(int64_t fd) {
     }
 }
 
+// ===========================================================================
+// ---- Production Infrastructure: Globals & Forward Declarations ----
+// Must be before phprs_server_new() which references these
+// ===========================================================================
+static int64_t phprs_max_body_size = 10 * 1024 * 1024;
+static int phprs_read_timeout_sec = 30;
+static int phprs_write_timeout_sec = 60;
+static int64_t phprs_max_connections = 10000;
+static volatile int64_t phprs_active_connections = 0;
+static volatile int64_t phprs_total_requests = 0;
+static volatile int phprs_shutting_down = 0;
+static int64_t phprs_server_fd_global = -1;
+static time_t phprs_start_time = 0;
+static int phprs_security_headers_enabled = 1;
+static volatile int64_t phprs_request_counter = 0;
+static char phprs_pidfile_path[256] = "";
+static FILE* phprs_access_log_fp = NULL;
+static FILE* phprs_error_log_fp = NULL;
+static volatile int64_t phprs_pool_memory = 0;
+#define PHPRS_MAX_POOL_MEMORY (512LL * 1024 * 1024)
+
+#ifndef _WIN32
+static pthread_mutex_t phprs_log_mutex = PTHREAD_MUTEX_INITIALIZER;
+#endif
+
+static void phprs_log_err(const char* fmt, ...);
+static void phprs_set_socket_timeouts(int fd);
+void phprs_server_init_signals(void);
+// ===========================================================================
+
 // ---- Socket Primitives ----
 
 int64_t phprs_server_new(int64_t port) {
 #ifdef _WIN32
     phprs_winsock_init();
 #endif
+    phprs_server_init_signals();
+    phprs_start_time = time(NULL);
+    if (!phprs_access_log_fp) phprs_access_log_fp = stdout;
+    if (!phprs_error_log_fp) phprs_error_log_fp = stderr;
+
     phprs_socket_t sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock == PHPRS_INVALID_SOCKET) return -1;
 
@@ -164,6 +204,7 @@ int64_t phprs_server_new(int64_t port) {
         (const char*)&opt, sizeof(opt));
 #else
         &opt, sizeof(opt));
+    setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
 #endif
 
     struct sockaddr_in addr;
@@ -175,10 +216,11 @@ int64_t phprs_server_new(int64_t port) {
         phprs_closesocket(sock);
         return -1;
     }
-    if (listen(sock, 128) == PHPRS_SOCKET_ERROR) {
+    if (listen(sock, 1024) == PHPRS_SOCKET_ERROR) {
         phprs_closesocket(sock);
         return -1;
     }
+    phprs_server_fd_global = (int64_t)sock;
     return (int64_t)sock;
 }
 
@@ -194,6 +236,18 @@ int64_t phprs_server_accept(int64_t server_fd) {
     phprs_socket_t client = accept((phprs_socket_t)server_fd,
         (struct sockaddr*)&client_addr, &len);
     if (client == PHPRS_INVALID_SOCKET) return -1;
+
+    // Connection limit check
+    if (phprs_active_connections >= phprs_max_connections) {
+        phprs_log_err("connection limit reached (%lld), rejecting", (long long)phprs_max_connections);
+        phprs_closesocket(client);
+        return -1;
+    }
+    __sync_add_and_fetch(&phprs_active_connections, 1);
+
+    // Set read/write timeouts on the accepted socket
+    phprs_set_socket_timeouts((int)client);
+
     unsigned char *ip = (unsigned char*)&client_addr.sin_addr;
     snprintf(phprs_last_client_ip, sizeof(phprs_last_client_ip),
         "%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
@@ -210,6 +264,25 @@ const char* phprs_client_ip(int64_t fd) {
 #else
 #define PHPRS_THREAD_LOCAL _Thread_local
 #endif
+
+// Additional forward declarations for production infrastructure
+static void phprs_log_access(const char* client_ip, const char* method, const char* path,
+                             int status_code, size_t response_bytes, double duration_ms, int64_t req_id);
+static void phprs_signal_handler(int sig);
+static void phprs_arena_reset(void);
+static const char* phprs_inject_security_headers(const char* response);
+static const char* phprs_inject_request_id(const char* response, int64_t req_id);
+static const char* phprs_handle_health(void);
+static const char* phprs_handle_metrics(void);
+void phprs_config_max_body(int64_t bytes);
+void phprs_config_timeout(int64_t read_sec, int64_t write_sec);
+void phprs_config_max_connections(int64_t max_conn);
+int64_t phprs_is_shutting_down(void);
+void phprs_log_init(const char* path);
+void phprs_log(const char* msg);
+void phprs_log_error_msg(const char* msg);
+void phprs_config(const char* json);
+void phprs_write_pidfile(const char* path);
 
 const char* phprs_socket_read(int64_t fd, int64_t max_size) {
     static PHPRS_THREAD_LOCAL char* buf = NULL;
@@ -2644,17 +2717,53 @@ static PHPRS_THREAD_RETURN phprs_tp_worker(void* arg) {
 #endif
 
         if (ta) {
+            phprs_arena_reset();
+            __sync_add_and_fetch(&phprs_total_requests, 1);
+            int64_t req_id = __sync_add_and_fetch(&phprs_request_counter, 1);
+
             // Set thread-local client IP so handlers can read it
             strncpy(phprs_last_client_ip, ta->client_ip, sizeof(phprs_last_client_ip) - 1);
             phprs_last_client_ip[sizeof(phprs_last_client_ip) - 1] = '\0';
-            phprs_handler_fn handler = phprs_lookup_handler(ta->func_name);
-            if (handler) {
-                const char* response = handler(ta->raw_request);
-                if (response) {
-                    phprs_socket_write(ta->client_fd, response);
+
+            // Extract method and path for logging and built-in endpoint check
+            const char* method = phprs_http_method(ta->raw_request);
+            const char* path = phprs_http_path(ta->raw_request);
+
+            // Built-in endpoints: /health and /metrics
+            const char* response = NULL;
+            if (path && strcmp(path, "/health") == 0) {
+                response = phprs_handle_health();
+            } else if (path && strcmp(path, "/metrics") == 0) {
+                response = phprs_handle_metrics();
+            } else {
+                phprs_handler_fn handler = phprs_lookup_handler(ta->func_name);
+                if (handler) {
+                    response = handler(ta->raw_request);
                 }
             }
+
+            if (response) {
+                // Inject security headers and request ID
+                const char* r1 = phprs_inject_security_headers(response);
+                const char* r2 = phprs_inject_request_id(r1, req_id);
+                phprs_socket_write(ta->client_fd, r2);
+
+                // Access log
+                int status = 200;
+                if (strstr(r2, "HTTP/1.1 4") || strstr(r2, "HTTP/1.1 5")) {
+                    const char* sp = strstr(r2, "HTTP/1.1 ");
+                    if (sp) status = atoi(sp + 9);
+                }
+                size_t resp_len = strlen(r2);
+                phprs_log_access(ta->client_ip, method, path, status, resp_len, 0.0, req_id);
+
+                if (r2 != r1 && r2 != response) free((void*)r2);
+                if (r1 != response) free((void*)r1);
+            }
+
             phprs_socket_close(ta->client_fd);
+            __sync_sub_and_fetch(&phprs_active_connections, 1);
+            __sync_sub_and_fetch(&phprs_pool_memory, (int64_t)strlen(ta->raw_request));
             free(ta->raw_request);
             free(ta);
         }
@@ -2693,6 +2802,27 @@ int64_t phprs_thread_pool_init(int64_t num_threads) {
 int64_t phprs_thread_pool_enqueue(const char* func_name, int64_t client_fd, const char* raw_request) {
     if (!func_name || !raw_request) return 0;
 
+    // Body size limit check
+    size_t req_len = strlen(raw_request);
+    if ((int64_t)req_len > phprs_max_body_size) {
+        const char* err = phprs_http_response(413, "text/plain", "Request Entity Too Large");
+        phprs_socket_write(client_fd, err);
+        phprs_socket_close(client_fd);
+        __sync_sub_and_fetch(&phprs_active_connections, 1);
+        phprs_log_err("rejected request: body too large (%zu > %lld)", req_len, (long long)phprs_max_body_size);
+        return 0;
+    }
+
+    // Pool memory limit check
+    if (phprs_pool_memory + (int64_t)req_len > PHPRS_MAX_POOL_MEMORY) {
+        const char* err = phprs_http_response(503, "text/plain", "Service Unavailable: memory limit");
+        phprs_socket_write(client_fd, err);
+        phprs_socket_close(client_fd);
+        __sync_sub_and_fetch(&phprs_active_connections, 1);
+        phprs_log_err("rejected request: pool memory limit reached");
+        return 0;
+    }
+
     struct phprs_thread_arg* ta = (struct phprs_thread_arg*)malloc(sizeof(struct phprs_thread_arg));
     if (!ta) return 0;
     ta->func_name = func_name;
@@ -2700,6 +2830,7 @@ int64_t phprs_thread_pool_enqueue(const char* func_name, int64_t client_fd, cons
     ta->raw_request = strdup(raw_request);
     strncpy(ta->client_ip, phprs_last_client_ip, sizeof(ta->client_ip) - 1);
     ta->client_ip[sizeof(ta->client_ip) - 1] = '\0';
+    __sync_add_and_fetch(&phprs_pool_memory, (int64_t)req_len);
 
 #ifdef _WIN32
     EnterCriticalSection(&phprs_tp.mutex);
@@ -2713,6 +2844,12 @@ int64_t phprs_thread_pool_enqueue(const char* func_name, int64_t client_fd, cons
 #else
         pthread_mutex_unlock(&phprs_tp.mutex);
 #endif
+        __sync_sub_and_fetch(&phprs_pool_memory, (int64_t)strlen(ta->raw_request));
+        const char* err503 = phprs_http_response(503, "text/plain", "Service Unavailable: queue full");
+        phprs_socket_write(ta->client_fd, err503);
+        phprs_socket_close(ta->client_fd);
+        __sync_sub_and_fetch(&phprs_active_connections, 1);
+        phprs_log_err("rejected request: thread pool queue full");
         free(ta->raw_request);
         free(ta);
         return 0;
@@ -2734,6 +2871,7 @@ int64_t phprs_thread_pool_enqueue(const char* func_name, int64_t client_fd, cons
 }
 
 void phprs_thread_pool_shutdown() {
+    phprs_log_err("shutting down thread pool (%d workers)...", phprs_tp.num_threads);
 #ifdef _WIN32
     EnterCriticalSection(&phprs_tp.mutex);
 #else
@@ -2764,6 +2902,351 @@ void phprs_thread_pool_shutdown() {
     pthread_cond_destroy(&phprs_tp.cond);
 #endif
 }
+
+// ===========================================================================
+// ---- Production Infrastructure: Function Implementations ----
+// ===========================================================================
+
+static void phprs_log_access(const char* client_ip, const char* method, const char* path,
+                             int status_code, size_t response_bytes, double duration_ms, int64_t req_id) {
+    if (!phprs_access_log_fp) return;
+    time_t now = time(NULL);
+    struct tm tm_buf;
+    char ts[32];
+#ifdef _WIN32
+    localtime_s(&tm_buf, &now);
+#else
+    localtime_r(&now, &tm_buf);
+#endif
+    strftime(ts, sizeof(ts), "%Y-%m-%dT%H:%M:%S", &tm_buf);
+
+#ifndef _WIN32
+    pthread_mutex_lock(&phprs_log_mutex);
+#endif
+    fprintf(phprs_access_log_fp, "[%s] %s \"%s %s\" %d %zu %.1fms req=%lld\n",
+            ts, client_ip ? client_ip : "-",
+            method ? method : "-", path ? path : "-",
+            status_code, response_bytes, duration_ms, (long long)req_id);
+    fflush(phprs_access_log_fp);
+#ifndef _WIN32
+    pthread_mutex_unlock(&phprs_log_mutex);
+#endif
+}
+
+static void phprs_log_err(const char* fmt, ...) {
+    if (!phprs_error_log_fp) phprs_error_log_fp = stderr;
+    time_t now = time(NULL);
+    struct tm tm_buf;
+    char ts[32];
+#ifdef _WIN32
+    localtime_s(&tm_buf, &now);
+#else
+    localtime_r(&now, &tm_buf);
+#endif
+    strftime(ts, sizeof(ts), "%Y-%m-%dT%H:%M:%S", &tm_buf);
+
+#ifndef _WIN32
+    pthread_mutex_lock(&phprs_log_mutex);
+#endif
+    fprintf(phprs_error_log_fp, "[%s] ERROR: ", ts);
+    va_list args;
+    va_start(args, fmt);
+    vfprintf(phprs_error_log_fp, fmt, args);
+    va_end(args);
+    fprintf(phprs_error_log_fp, "\n");
+    fflush(phprs_error_log_fp);
+#ifndef _WIN32
+    pthread_mutex_unlock(&phprs_log_mutex);
+#endif
+}
+
+// ---- Signal Handling (Graceful Shutdown) ----
+static void phprs_signal_handler(int sig) {
+    (void)sig;
+    phprs_shutting_down = 1;
+    if (phprs_server_fd_global >= 0) {
+#ifdef _WIN32
+        closesocket((SOCKET)phprs_server_fd_global);
+#else
+        close((int)phprs_server_fd_global);
+#endif
+        phprs_server_fd_global = -1;
+    }
+}
+
+int64_t phprs_is_shutting_down(void) {
+    return phprs_shutting_down ? 1 : 0;
+}
+
+// ---- Security Headers Injection ----
+static const char* phprs_inject_security_headers(const char* response) {
+    if (!phprs_security_headers_enabled || !response) return response;
+    const char* hdr_end = strstr(response, "\r\n");
+    if (!hdr_end) return response;
+
+    static const char* sec_hdrs =
+        "X-Content-Type-Options: nosniff\r\n"
+        "X-Frame-Options: SAMEORIGIN\r\n"
+        "X-XSS-Protection: 1; mode=block\r\n"
+        "Referrer-Policy: strict-origin-when-cross-origin\r\n";
+
+    size_t sec_len = strlen(sec_hdrs);
+    size_t resp_len = strlen(response);
+    size_t prefix_len = (size_t)(hdr_end - response) + 2; // include \r\n
+
+    char* result = (char*)malloc(resp_len + sec_len + 1);
+    if (!result) return response;
+    memcpy(result, response, prefix_len);
+    memcpy(result + prefix_len, sec_hdrs, sec_len);
+    memcpy(result + prefix_len + sec_len, response + prefix_len, resp_len - prefix_len);
+    result[resp_len + sec_len] = '\0';
+    return result;
+}
+
+// ---- Request ID Header Injection ----
+static const char* phprs_inject_request_id(const char* response, int64_t req_id) {
+    if (!response) return response;
+    const char* hdr_end = strstr(response, "\r\n");
+    if (!hdr_end) return response;
+
+    char id_hdr[64];
+    int id_len = snprintf(id_hdr, sizeof(id_hdr), "X-Request-Id: %lld\r\n", (long long)req_id);
+
+    size_t resp_len = strlen(response);
+    size_t prefix_len = (size_t)(hdr_end - response) + 2;
+
+    char* result = (char*)malloc(resp_len + (size_t)id_len + 1);
+    if (!result) return response;
+    memcpy(result, response, prefix_len);
+    memcpy(result + prefix_len, id_hdr, (size_t)id_len);
+    memcpy(result + prefix_len + (size_t)id_len, response + prefix_len, resp_len - prefix_len);
+    result[resp_len + (size_t)id_len] = '\0';
+    return result;
+}
+
+// ---- Health & Metrics Endpoints ----
+static const char* phprs_handle_health(void) {
+    time_t uptime = time(NULL) - phprs_start_time;
+    char body[512];
+    snprintf(body, sizeof(body),
+        "{\"status\":\"ok\",\"uptime\":%lld,\"total_requests\":%lld,"
+        "\"active_connections\":%lld,\"queue_depth\":%d,\"workers\":%d}",
+        (long long)uptime, (long long)phprs_total_requests,
+        (long long)phprs_active_connections, phprs_tp.count, phprs_tp.num_threads);
+    return phprs_http_response(200, "application/json", body);
+}
+
+static const char* phprs_handle_metrics(void) {
+    time_t uptime = time(NULL) - phprs_start_time;
+    char body[1024];
+    snprintf(body, sizeof(body),
+        "# HELP phprs_requests_total Total HTTP requests processed\n"
+        "# TYPE phprs_requests_total counter\n"
+        "phprs_requests_total %lld\n"
+        "# HELP phprs_active_connections Current active connections\n"
+        "# TYPE phprs_active_connections gauge\n"
+        "phprs_active_connections %lld\n"
+        "# HELP phprs_queue_depth Current thread pool queue depth\n"
+        "# TYPE phprs_queue_depth gauge\n"
+        "phprs_queue_depth %d\n"
+        "# HELP phprs_uptime_seconds Server uptime in seconds\n"
+        "# TYPE phprs_uptime_seconds gauge\n"
+        "phprs_uptime_seconds %lld\n"
+        "# HELP phprs_workers Thread pool worker count\n"
+        "# TYPE phprs_workers gauge\n"
+        "phprs_workers %d\n",
+        (long long)phprs_total_requests,
+        (long long)phprs_active_connections,
+        phprs_tp.count,
+        (long long)uptime,
+        phprs_tp.num_threads);
+    return phprs_http_response(200, "text/plain; charset=utf-8", body);
+}
+
+// ---- Request Arena Allocator (per-thread) ----
+#define PHPRS_ARENA_SIZE (256 * 1024)
+static PHPRS_THREAD_LOCAL char phprs_arena_buf[PHPRS_ARENA_SIZE];
+static PHPRS_THREAD_LOCAL size_t phprs_arena_offset = 0;
+
+static char* phprs_arena_alloc(size_t size) {
+    size = (size + 7) & ~(size_t)7; // 8-byte align
+    if (phprs_arena_offset + size > PHPRS_ARENA_SIZE) return (char*)malloc(size);
+    char* ptr = phprs_arena_buf + phprs_arena_offset;
+    phprs_arena_offset += size;
+    return ptr;
+}
+
+static void phprs_arena_reset(void) {
+    phprs_arena_offset = 0;
+}
+
+// ---- Bounded String Dup ----
+static char* phprs_safe_strdup(const char* s, size_t max_len) {
+    if (!s) return NULL;
+    size_t len = strlen(s);
+    if (len > max_len) return NULL;
+    return strdup(s);
+}
+
+// ---- Safe String Builder ----
+typedef struct {
+    char* buf;
+    size_t len;
+    size_t cap;
+} phprs_strbuf;
+
+static void phprs_strbuf_init(phprs_strbuf* sb, size_t initial_cap) {
+    sb->buf = (char*)malloc(initial_cap);
+    sb->len = 0;
+    sb->cap = initial_cap;
+    if (sb->buf) sb->buf[0] = '\0';
+}
+
+static void phprs_strbuf_append(phprs_strbuf* sb, const char* s, size_t slen) {
+    if (!sb->buf || !s) return;
+    if (sb->len + slen + 1 > sb->cap) {
+        size_t new_cap = (sb->cap * 2 > sb->len + slen + 1) ? sb->cap * 2 : sb->len + slen + 64;
+        char* new_buf = (char*)realloc(sb->buf, new_cap);
+        if (!new_buf) return;
+        sb->buf = new_buf;
+        sb->cap = new_cap;
+    }
+    memcpy(sb->buf + sb->len, s, slen);
+    sb->len += slen;
+    sb->buf[sb->len] = '\0';
+}
+
+static void phprs_strbuf_free(phprs_strbuf* sb) {
+    free(sb->buf);
+    sb->buf = NULL;
+    sb->len = sb->cap = 0;
+}
+
+// ---- PID File ----
+void phprs_write_pidfile(const char* path) {
+    if (!path || !path[0]) return;
+    FILE* f = fopen(path, "w");
+    if (f) {
+#ifdef _WIN32
+        fprintf(f, "%d\n", (int)GetCurrentProcessId());
+#else
+        fprintf(f, "%d\n", (int)getpid());
+#endif
+        fclose(f);
+        strncpy(phprs_pidfile_path, path, sizeof(phprs_pidfile_path) - 1);
+    }
+}
+
+static void phprs_remove_pidfile(void) {
+    if (phprs_pidfile_path[0]) {
+        remove(phprs_pidfile_path);
+        phprs_pidfile_path[0] = '\0';
+    }
+}
+
+// ---- Socket Timeout Configuration ----
+static void phprs_set_socket_timeouts(int fd) {
+#ifdef _WIN32
+    DWORD rtimeout = (DWORD)(phprs_read_timeout_sec * 1000);
+    DWORD wtimeout = (DWORD)(phprs_write_timeout_sec * 1000);
+    setsockopt((SOCKET)fd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&rtimeout, sizeof(rtimeout));
+    setsockopt((SOCKET)fd, SOL_SOCKET, SO_SNDTIMEO, (const char*)&wtimeout, sizeof(wtimeout));
+#else
+    struct timeval rtv = { phprs_read_timeout_sec, 0 };
+    struct timeval wtv = { phprs_write_timeout_sec, 0 };
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &rtv, sizeof(rtv));
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &wtv, sizeof(wtv));
+#endif
+}
+
+// ---- Configuration API ----
+void phprs_config_max_body(int64_t bytes) {
+    if (bytes > 0) phprs_max_body_size = bytes;
+}
+
+void phprs_config_timeout(int64_t read_sec, int64_t write_sec) {
+    if (read_sec > 0) phprs_read_timeout_sec = (int)read_sec;
+    if (write_sec > 0) phprs_write_timeout_sec = (int)write_sec;
+}
+
+void phprs_config_max_connections(int64_t max_conn) {
+    if (max_conn > 0) phprs_max_connections = max_conn;
+}
+
+void phprs_log_init(const char* path) {
+    if (!path || !path[0] || strcmp(path, "-") == 0) {
+        phprs_access_log_fp = stdout;
+    } else {
+        phprs_access_log_fp = fopen(path, "a");
+        if (!phprs_access_log_fp) phprs_access_log_fp = stdout;
+    }
+    if (!phprs_error_log_fp) phprs_error_log_fp = stderr;
+}
+
+void phprs_server_init_signals(void) {
+#ifndef _WIN32
+    signal(SIGPIPE, SIG_IGN);
+    signal(SIGTERM, phprs_signal_handler);
+    signal(SIGINT, phprs_signal_handler);
+#else
+    signal(SIGINT, phprs_signal_handler);
+    signal(SIGTERM, phprs_signal_handler);
+#endif
+}
+
+// Callable from PHPRS: phprs_config(string $json)
+void phprs_config(const char* json) {
+    if (!json) return;
+    int64_t port = phprs_json_get_int(json, "port");
+    (void)port; // port is set separately
+    int64_t threads = phprs_json_get_int(json, "threads");
+    (void)threads; // threads set in pool_init
+    int64_t max_body = phprs_json_get_int(json, "max_body");
+    if (max_body > 0) phprs_max_body_size = max_body;
+    int64_t read_timeout = phprs_json_get_int(json, "read_timeout");
+    if (read_timeout > 0) phprs_read_timeout_sec = (int)read_timeout;
+    int64_t write_timeout = phprs_json_get_int(json, "write_timeout");
+    if (write_timeout > 0) phprs_write_timeout_sec = (int)write_timeout;
+    int64_t max_conn = phprs_json_get_int(json, "max_connections");
+    if (max_conn > 0) phprs_max_connections = max_conn;
+    const char* log_path = phprs_json_get_string(json, "log");
+    if (log_path && log_path[0]) phprs_log_init(log_path);
+    const char* pidfile = phprs_json_get_string(json, "pidfile");
+    if (pidfile && pidfile[0]) phprs_write_pidfile(pidfile);
+    int64_t backlog = phprs_json_get_int(json, "backlog");
+    (void)backlog; // backlog can't be changed after listen()
+}
+
+// Callable from PHPRS: phprs_log(string $msg)
+void phprs_log(const char* msg) {
+    if (!phprs_access_log_fp) phprs_access_log_fp = stdout;
+    time_t now = time(NULL);
+    struct tm tm_buf;
+    char ts[32];
+#ifdef _WIN32
+    localtime_s(&tm_buf, &now);
+#else
+    localtime_r(&now, &tm_buf);
+#endif
+    strftime(ts, sizeof(ts), "%Y-%m-%dT%H:%M:%S", &tm_buf);
+#ifndef _WIN32
+    pthread_mutex_lock(&phprs_log_mutex);
+#endif
+    fprintf(phprs_access_log_fp, "[%s] %s\n", ts, msg ? msg : "");
+    fflush(phprs_access_log_fp);
+#ifndef _WIN32
+    pthread_mutex_unlock(&phprs_log_mutex);
+#endif
+}
+
+// Callable from PHPRS: phprs_log_error_msg(string $msg)
+void phprs_log_error_msg(const char* msg) {
+    phprs_log_err("%s", msg ? msg : "");
+}
+
+// ===========================================================================
+// ---- End Production Infrastructure ----
+// ===========================================================================
 
 // ---- Mutex (integer handle API) ----
 

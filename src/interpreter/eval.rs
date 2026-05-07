@@ -2527,6 +2527,12 @@ impl Interpreter {
             "phprs_app_get_routes" => Ok(Value::String_("".to_string())),
             "phprs_app_set_port" => Ok(Value::Null),
             "phprs_app_get_port" => Ok(Value::Int(0)),
+            // ---- Production Infrastructure (no-op in interpreter) ----
+            "phprs_config" | "phprs_config_max_body" | "phprs_config_timeout"
+            | "phprs_config_max_connections" | "phprs_log" | "phprs_log_error_msg"
+            | "phprs_log_init" | "phprs_server_init_signals" | "phprs_write_pidfile"
+            => Ok(Value::Null),
+            "phprs_is_shutting_down" => Ok(Value::Int(0)),
             // ---- String Validation ----
             "phprs_str_is_alnum" => {
                 if args.len() != 1 { return Err("phprs_str_is_alnum() expects 1 argument".into()); }
@@ -4410,6 +4416,11 @@ impl Interpreter {
             | "fmod" | "intdiv" | "checkdate" | "mktime"
             // Batch 2: Misc
             | "printf" | "str_starts_with" | "str_ends_with"
+            // Production infrastructure (no-op in interpreter)
+            | "phprs_config" | "phprs_config_max_body" | "phprs_config_timeout"
+            | "phprs_config_max_connections" | "phprs_is_shutting_down"
+            | "phprs_log" | "phprs_log_error_msg" | "phprs_log_init"
+            | "phprs_server_init_signals" | "phprs_write_pidfile"
         )
     }
 

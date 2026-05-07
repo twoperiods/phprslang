@@ -73,6 +73,17 @@ impl TypeEnv {
         env.funcs.insert("phprs_app_get_port".into(), (vec![], Ty::Int));
         // String validation
         env.funcs.insert("phprs_str_is_alnum".into(), (vec![Ty::String], Ty::Int));
+        // Production infrastructure
+        env.funcs.insert("phprs_config".into(), (vec![Ty::String], Ty::Void));
+        env.funcs.insert("phprs_config_max_body".into(), (vec![Ty::Int], Ty::Void));
+        env.funcs.insert("phprs_config_timeout".into(), (vec![Ty::Int, Ty::Int], Ty::Void));
+        env.funcs.insert("phprs_config_max_connections".into(), (vec![Ty::Int], Ty::Void));
+        env.funcs.insert("phprs_is_shutting_down".into(), (vec![], Ty::Int));
+        env.funcs.insert("phprs_log".into(), (vec![Ty::String], Ty::Void));
+        env.funcs.insert("phprs_log_error_msg".into(), (vec![Ty::String], Ty::Void));
+        env.funcs.insert("phprs_log_init".into(), (vec![Ty::String], Ty::Void));
+        env.funcs.insert("phprs_server_init_signals".into(), (vec![], Ty::Void));
+        env.funcs.insert("phprs_write_pidfile".into(), (vec![Ty::String], Ty::Void));
         env
     }
 

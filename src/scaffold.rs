@@ -260,6 +260,12 @@ function handle_request(string $raw): string {{
 function app_main(): void {{
     let $port = 8080;
 
+    // ---- Production Config ----
+    phprs_config_max_body(10485760);    // 10 MB max request body
+    phprs_config_timeout(30, 60);       // read=30s, write=60s
+    phprs_config_max_connections(10000); // max 10000 concurrent connections
+    phprs_log_init("-");                 // access log to stdout
+
     // ---- Middleware Config ----
     rate_limit_config(100, 60);   // 100 req/min per IP
     cors_config("http://localhost:8080", "GET,POST,PUT,DELETE,PATCH,OPTIONS", "Content-Type,Authorization");
@@ -283,12 +289,20 @@ function app_main(): void {{
 
     echo "============================================\n";
     echo "  {0} - PHPRS MVC Application\n";
-    echo "  Server: http://localhost:" . $port . "\n";
+    echo "  Server: http://0.0.0.0:" . $port . "\n";
     echo "  Workers: 8 threads\n";
-    echo "  Press Ctrl+C to stop.\n";
+    echo "  Max body: 10 MB\n";
+    echo "  Timeouts: read=30s write=60s\n";
+    echo "  Endpoints: /health /metrics\n";
+    echo "  Ctrl+C for graceful shutdown.\n";
     echo "============================================\n";
 
     for (let mut $running = 1; $running == 1; ) {{
+        // Graceful shutdown check
+        if (phprs_is_shutting_down() == 1) {{
+            break;
+        }}
+
         let $client = phprs_server_accept($sock);
 
         if ($client >= 0) {{
@@ -317,8 +331,10 @@ function app_main(): void {{
         }}
     }}
 
+    echo "\nGraceful shutdown: draining thread pool...\n";
     phprs_thread_pool_shutdown();
     phprs_socket_close($sock);
+    echo "Server stopped.\n";
 }}
 
 app_main();
@@ -477,6 +493,18 @@ extern function phprs_cors_get_origin(): string;
 extern function phprs_cors_get_methods(): string;
 extern function phprs_cors_get_headers(): string;
 extern function phprs_cors_is_preflight(string $raw): int;
+
+// ---- Production Infrastructure ----
+extern function phprs_config(string $json): void;
+extern function phprs_config_max_body(int $bytes): void;
+extern function phprs_config_timeout(int $read_sec, int $write_sec): void;
+extern function phprs_config_max_connections(int $max): void;
+extern function phprs_is_shutting_down(): int;
+extern function phprs_log(string $msg): void;
+extern function phprs_log_error_msg(string $msg): void;
+extern function phprs_log_init(string $path): void;
+extern function phprs_server_init_signals(): void;
+extern function phprs_write_pidfile(string $path): void;
 ?>"##;
 
 // ---- Default Home Controller ----
