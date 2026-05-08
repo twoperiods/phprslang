@@ -60,6 +60,12 @@ int64_t count(int64_t* arr) {
 #ifndef _WIN32
 #include <sys/time.h>
 #include <netinet/tcp.h>
+#include <pthread.h>
+#endif
+
+// ---- MySQL Client (via libmysqlclient) ----
+#ifdef PHPRS_HAS_MYSQL
+#include <mysql/mysql.h>
 #endif
 
 #ifndef _WIN32
@@ -170,6 +176,8 @@ static time_t phprs_start_time = 0;
 static int phprs_security_headers_enabled = 1;
 static volatile int64_t phprs_request_counter = 0;
 static char phprs_pidfile_path[256] = "";
+static char phprs_access_log_path[512] = "";
+static char phprs_error_log_path[512] = "";
 static FILE* phprs_access_log_fp = NULL;
 static FILE* phprs_error_log_fp = NULL;
 static volatile int64_t phprs_pool_memory = 0;
@@ -182,6 +190,53 @@ static pthread_mutex_t phprs_log_mutex = PTHREAD_MUTEX_INITIALIZER;
 static void phprs_log_err(const char* fmt, ...);
 static void phprs_set_socket_timeouts(int fd);
 void phprs_server_init_signals(void);
+#ifndef _WIN32
+static void phprs_sighup_handler(int sig);
+#endif
+
+// ---- Redis Connection Pool Globals ----
+#define PHPRS_REDIS_POOL_SIZE 8
+static int phprs_redis_pool_fds[PHPRS_REDIS_POOL_SIZE];
+static int phprs_redis_pool_used[PHPRS_REDIS_POOL_SIZE];
+static int phprs_redis_pool_inited = 0;
+static char phprs_redis_host[256] = "127.0.0.1";
+static int  phprs_redis_port = 6379;
+static char phprs_redis_pass[256] = "";
+#ifndef _WIN32
+static pthread_mutex_t phprs_redis_mutex = PTHREAD_MUTEX_INITIALIZER;
+#endif
+
+// ---- MySQL Connection Pool Globals ----
+#define PHPRS_MYSQL_POOL_SIZE 8
+#ifdef PHPRS_HAS_MYSQL
+static MYSQL* phprs_mysql_pool_conns[PHPRS_MYSQL_POOL_SIZE];
+#else
+static void*  phprs_mysql_pool_conns[PHPRS_MYSQL_POOL_SIZE];
+#endif
+static int phprs_mysql_pool_used[PHPRS_MYSQL_POOL_SIZE];
+static int phprs_mysql_pool_inited = 0;
+static char phprs_mysql_host[256] = "127.0.0.1";
+static int  phprs_mysql_port_val = 3306;
+static char phprs_mysql_user[256] = "root";
+static char phprs_mysql_pass[256] = "";
+static char phprs_mysql_dbname[256] = "test";
+#ifndef _WIN32
+static pthread_mutex_t phprs_mysql_mutex = PTHREAD_MUTEX_INITIALIZER;
+#endif
+
+// ---- WebSocket Connection Manager Globals ----
+#define PHPRS_WS_MAX_CLIENTS 1024
+static struct {
+    int64_t fd;
+    char    room[128];
+    time_t  last_pong;
+    int     active;
+} phprs_ws_clients[PHPRS_WS_MAX_CLIENTS];
+static int phprs_ws_client_count = 0;
+static int phprs_ws_heartbeat_sec = 30;
+#ifndef _WIN32
+static pthread_mutex_t phprs_ws_mutex = PTHREAD_MUTEX_INITIALIZER;
+#endif
 // ===========================================================================
 
 // ---- Socket Primitives ----
@@ -2729,6 +2784,16 @@ static PHPRS_THREAD_RETURN phprs_tp_worker(void* arg) {
             const char* method = phprs_http_method(ta->raw_request);
             const char* path = phprs_http_path(ta->raw_request);
 
+            // Start request timing
+            struct timespec ts_start, ts_end;
+#ifdef _WIN32
+            LARGE_INTEGER qpc_start, qpc_end, qpc_freq;
+            QueryPerformanceFrequency(&qpc_freq);
+            QueryPerformanceCounter(&qpc_start);
+#else
+            clock_gettime(CLOCK_MONOTONIC, &ts_start);
+#endif
+
             // Built-in endpoints: /health and /metrics
             const char* response = NULL;
             if (path && strcmp(path, "/health") == 0) {
@@ -2748,14 +2813,25 @@ static PHPRS_THREAD_RETURN phprs_tp_worker(void* arg) {
                 const char* r2 = phprs_inject_request_id(r1, req_id);
                 phprs_socket_write(ta->client_fd, r2);
 
-                // Access log
+                // Calculate request duration
+#ifdef _WIN32
+                QueryPerformanceCounter(&qpc_end);
+                double duration_ms = (double)(qpc_end.QuadPart - qpc_start.QuadPart) * 1000.0 / (double)qpc_freq.QuadPart;
+#else
+                clock_gettime(CLOCK_MONOTONIC, &ts_end);
+                double duration_ms = (double)(ts_end.tv_sec - ts_start.tv_sec) * 1000.0
+                                   + (double)(ts_end.tv_nsec - ts_start.tv_nsec) / 1000000.0;
+#endif
+
+                // Access log — extract status from response line
                 int status = 200;
-                if (strstr(r2, "HTTP/1.1 4") || strstr(r2, "HTTP/1.1 5")) {
-                    const char* sp = strstr(r2, "HTTP/1.1 ");
-                    if (sp) status = atoi(sp + 9);
+                const char* sp = strstr(r2, "HTTP/1.1 ");
+                if (sp) {
+                    int parsed = atoi(sp + 9);
+                    if (parsed >= 100 && parsed <= 599) status = parsed;
                 }
                 size_t resp_len = strlen(r2);
-                phprs_log_access(ta->client_ip, method, path, status, resp_len, 0.0, req_id);
+                phprs_log_access(ta->client_ip, method, path, status, resp_len, duration_ms, req_id);
 
                 if (r2 != r1 && r2 != response) free((void*)r2);
                 if (r1 != response) free((void*)r1);
@@ -2978,6 +3054,33 @@ int64_t phprs_is_shutting_down(void) {
     return phprs_shutting_down ? 1 : 0;
 }
 
+// ---- SIGHUP: Reopen log files for log rotation ----
+#ifndef _WIN32
+static void phprs_sighup_handler(int sig) {
+    (void)sig;
+    // Reopen access log
+    if (phprs_access_log_path[0] && phprs_access_log_fp && phprs_access_log_fp != stdout) {
+        FILE* new_fp = fopen(phprs_access_log_path, "a");
+        if (new_fp) {
+            FILE* old_fp = phprs_access_log_fp;
+            phprs_access_log_fp = new_fp;
+            fclose(old_fp);
+        }
+    }
+    // Reopen error log
+    if (phprs_error_log_path[0] && phprs_error_log_fp && phprs_error_log_fp != stderr) {
+        FILE* new_fp = fopen(phprs_error_log_path, "a");
+        if (new_fp) {
+            FILE* old_fp = phprs_error_log_fp;
+            phprs_error_log_fp = new_fp;
+            fclose(old_fp);
+        }
+    }
+    // Re-register signal handler (some systems reset to SIG_DFL)
+    signal(SIGHUP, phprs_sighup_handler);
+}
+#endif
+
 // ---- Security Headers Injection ----
 static const char* phprs_inject_security_headers(const char* response) {
     if (!phprs_security_headers_enabled || !response) return response;
@@ -3176,7 +3279,10 @@ void phprs_config_max_connections(int64_t max_conn) {
 void phprs_log_init(const char* path) {
     if (!path || !path[0] || strcmp(path, "-") == 0) {
         phprs_access_log_fp = stdout;
+        phprs_access_log_path[0] = '\0';
     } else {
+        strncpy(phprs_access_log_path, path, sizeof(phprs_access_log_path) - 1);
+        phprs_access_log_path[sizeof(phprs_access_log_path) - 1] = '\0';
         phprs_access_log_fp = fopen(path, "a");
         if (!phprs_access_log_fp) phprs_access_log_fp = stdout;
     }
@@ -3188,6 +3294,7 @@ void phprs_server_init_signals(void) {
     signal(SIGPIPE, SIG_IGN);
     signal(SIGTERM, phprs_signal_handler);
     signal(SIGINT, phprs_signal_handler);
+    signal(SIGHUP, phprs_sighup_handler);
 #else
     signal(SIGINT, phprs_signal_handler);
     signal(SIGTERM, phprs_signal_handler);
@@ -3211,6 +3318,13 @@ void phprs_config(const char* json) {
     if (max_conn > 0) phprs_max_connections = max_conn;
     const char* log_path = phprs_json_get_string(json, "log");
     if (log_path && log_path[0]) phprs_log_init(log_path);
+    const char* error_log_path = phprs_json_get_string(json, "error_log");
+    if (error_log_path && error_log_path[0]) {
+        strncpy(phprs_error_log_path, error_log_path, sizeof(phprs_error_log_path) - 1);
+        phprs_error_log_path[sizeof(phprs_error_log_path) - 1] = '\0';
+        FILE* efp = fopen(error_log_path, "a");
+        if (efp) phprs_error_log_fp = efp;
+    }
     const char* pidfile = phprs_json_get_string(json, "pidfile");
     if (pidfile && pidfile[0]) phprs_write_pidfile(pidfile);
     int64_t backlog = phprs_json_get_int(json, "backlog");
@@ -4578,7 +4692,7 @@ bool password_verify(const char* password, const char* stored_hash) {
 
 // ---- Rate Limiting ----
 
-#define RATE_LIMIT_SLOTS 256
+#define RATE_LIMIT_SLOTS 4096
 
 typedef struct {
     char ip[46];
@@ -4896,4 +5010,1144 @@ bool str_ends_with(const char* haystack, const char* needle) {
     size_t nlen = strlen(needle);
     if (nlen > hlen) return false;
     return strcmp(haystack + hlen - nlen, needle) == 0;
+}
+
+// ===========================================================================
+// ---- Redis RESP Client with Connection Pool ----
+// ===========================================================================
+
+// Send raw bytes to socket
+static int phprs_redis_send(int fd, const char* data, size_t len) {
+    size_t sent = 0;
+    while (sent < len) {
+        ssize_t n = send(fd, data + sent, len - sent, 0);
+        if (n <= 0) return -1;
+        sent += (size_t)n;
+    }
+    return 0;
+}
+
+// Buffered reader for Redis RESP protocol — avoids per-byte syscalls
+#define PHPRS_REDIS_RDBUF_SIZE 8192
+typedef struct {
+    int fd;
+    char buf[PHPRS_REDIS_RDBUF_SIZE];
+    size_t pos;
+    size_t len;
+} phprs_redis_rdbuf;
+
+static void phprs_redis_rdbuf_init(phprs_redis_rdbuf* rb, int fd) {
+    rb->fd = fd;
+    rb->pos = 0;
+    rb->len = 0;
+}
+
+// Fill buffer from socket if needed
+static int phprs_redis_rdbuf_fill(phprs_redis_rdbuf* rb) {
+    if (rb->pos < rb->len) return 0; // still have data
+    ssize_t n = recv(rb->fd, rb->buf, PHPRS_REDIS_RDBUF_SIZE, 0);
+    if (n <= 0) return -1;
+    rb->pos = 0;
+    rb->len = (size_t)n;
+    return 0;
+}
+
+// Read one RESP line (until \r\n) using buffered reader
+static int phprs_redis_readline(phprs_redis_rdbuf* rb, char* buf, size_t max) {
+    size_t out = 0;
+    while (out < max - 1) {
+        if (phprs_redis_rdbuf_fill(rb) < 0) return -1;
+        char c = rb->buf[rb->pos++];
+        buf[out++] = c;
+        if (out >= 2 && buf[out-2] == '\r' && buf[out-1] == '\n') {
+            buf[out-2] = '\0';
+            return (int)(out - 2);
+        }
+    }
+    buf[out] = '\0';
+    return (int)out;
+}
+
+// Read exactly n bytes using buffered reader
+static int phprs_redis_readn(phprs_redis_rdbuf* rb, char* buf, size_t n) {
+    size_t got = 0;
+    while (got < n) {
+        if (phprs_redis_rdbuf_fill(rb) < 0) return -1;
+        size_t avail = rb->len - rb->pos;
+        size_t want = n - got;
+        size_t take = avail < want ? avail : want;
+        memcpy(buf + got, rb->buf + rb->pos, take);
+        rb->pos += take;
+        got += take;
+    }
+    return 0;
+}
+
+// Read a RESP reply recursively using buffered reader, return as string
+static const char* phprs_redis_read_reply_buf(phprs_redis_rdbuf* rb) {
+    char line[4096];
+    if (phprs_redis_readline(rb, line, sizeof(line)) < 0) return strdup("(error) connection lost");
+    switch (line[0]) {
+        case '+': return strdup(line + 1);                  // Simple string
+        case '-': {                                          // Error
+            char* r = malloc(strlen(line) + 16);
+            sprintf(r, "(error) %s", line + 1);
+            return r;
+        }
+        case ':': return strdup(line + 1);                  // Integer
+        case '$': {                                          // Bulk string
+            int len = atoi(line + 1);
+            if (len < 0) return strdup("(nil)");
+            char* data = malloc((size_t)len + 1);
+            if (phprs_redis_readn(rb, data, (size_t)len) < 0) { free(data); return strdup("(error) read failed"); }
+            data[len] = '\0';
+            // consume trailing \r\n
+            char crlf[2];
+            phprs_redis_readn(rb, crlf, 2);
+            return data;
+        }
+        case '*': {                                          // Array
+            int count = atoi(line + 1);
+            if (count < 0) return strdup("(nil)");
+            if (count == 0) return strdup("[]");
+            // Build JSON array using string builder to avoid O(n²) strcat
+            size_t cap = 256;
+            size_t slen = 0;
+            char* result = malloc(cap);
+            result[slen++] = '[';
+            for (int i = 0; i < count; i++) {
+                const char* elem = phprs_redis_read_reply_buf(rb);
+                size_t elen = strlen(elem);
+                // worst case: every char needs escaping (x2) + quotes + comma
+                size_t need = slen + elen * 2 + 8;
+                if (need > cap) { cap = need * 2; result = realloc(result, cap); }
+                if (i > 0) result[slen++] = ',';
+                result[slen++] = '"';
+                for (const char* p = elem; *p; p++) {
+                    if (slen + 4 > cap) { cap *= 2; result = realloc(result, cap); }
+                    if (*p == '"') { result[slen++] = '\\'; result[slen++] = '"'; }
+                    else if (*p == '\\') { result[slen++] = '\\'; result[slen++] = '\\'; }
+                    else { result[slen++] = *p; }
+                }
+                result[slen++] = '"';
+                free((void*)elem);
+            }
+            if (slen + 2 > cap) { cap = slen + 4; result = realloc(result, cap); }
+            result[slen++] = ']';
+            result[slen] = '\0';
+            return result;
+        }
+        default: return strdup(line);
+    }
+}
+
+// Thread-local read buffer for Redis (one per worker thread)
+static PHPRS_THREAD_LOCAL phprs_redis_rdbuf phprs_redis_tl_rdbuf;
+static PHPRS_THREAD_LOCAL int phprs_redis_tl_rdbuf_fd = -1;
+
+// Get/reset thread-local read buffer for given fd
+static phprs_redis_rdbuf* phprs_redis_get_rdbuf(int fd) {
+    if (phprs_redis_tl_rdbuf_fd != fd) {
+        phprs_redis_rdbuf_init(&phprs_redis_tl_rdbuf, fd);
+        phprs_redis_tl_rdbuf_fd = fd;
+    }
+    return &phprs_redis_tl_rdbuf;
+}
+
+// Read a RESP reply from fd using thread-local buffered reader
+static const char* phprs_redis_read_reply(int fd) {
+    phprs_redis_rdbuf* rb = phprs_redis_get_rdbuf(fd);
+    return phprs_redis_read_reply_buf(rb);
+}
+
+// Format and send a RESP command (variadic: count + strings)
+static const char* phprs_redis_command_v(int fd, int argc, const char** argv) {
+    // Build RESP: *argc\r\n$len\r\narg\r\n...
+    size_t cap = 64;
+    for (int i = 0; i < argc; i++) cap += strlen(argv[i]) + 24;
+    char* cmd = malloc(cap);
+    int off = sprintf(cmd, "*%d\r\n", argc);
+    for (int i = 0; i < argc; i++) {
+        size_t slen = strlen(argv[i]);
+        off += sprintf(cmd + off, "$%zu\r\n", slen);
+        memcpy(cmd + off, argv[i], slen); off += (int)slen;
+        cmd[off++] = '\r'; cmd[off++] = '\n';
+    }
+    if (phprs_redis_send(fd, cmd, (size_t)off) < 0) {
+        free(cmd);
+        return strdup("(error) send failed");
+    }
+    free(cmd);
+    return phprs_redis_read_reply(fd);
+}
+
+// Initialize Redis connection pool
+void phprs_redis_init(const char* host, int64_t port, const char* password) {
+    if (host && *host) strncpy(phprs_redis_host, host, sizeof(phprs_redis_host) - 1);
+    phprs_redis_port = (int)port;
+    if (password) strncpy(phprs_redis_pass, password, sizeof(phprs_redis_pass) - 1);
+    memset(phprs_redis_pool_fds, -1, sizeof(phprs_redis_pool_fds));
+    memset(phprs_redis_pool_used, 0, sizeof(phprs_redis_pool_used));
+    phprs_redis_pool_inited = 1;
+}
+
+// Get a connection from pool (or create new one)
+static int phprs_redis_acquire(void) {
+    if (!phprs_redis_pool_inited) phprs_redis_init("127.0.0.1", 6379, "");
+#ifndef _WIN32
+    pthread_mutex_lock(&phprs_redis_mutex);
+#endif
+    // Try to find a free connection
+    for (int i = 0; i < PHPRS_REDIS_POOL_SIZE; i++) {
+        if (phprs_redis_pool_fds[i] >= 0 && !phprs_redis_pool_used[i]) {
+            // Health check: send PING to verify connection is alive
+            int fd = phprs_redis_pool_fds[i];
+            const char* ping_cmd = "*1\r\n$4\r\nPING\r\n";
+            if (phprs_redis_send(fd, ping_cmd, strlen(ping_cmd)) < 0) {
+                // Connection dead — close and mark slot empty
+                close(fd);
+                phprs_redis_pool_fds[i] = -1;
+                continue;
+            }
+            // Read PONG reply — reset thread-local buffer for this fd
+            phprs_redis_rdbuf pong_rb;
+            phprs_redis_rdbuf_init(&pong_rb, fd);
+            const char* reply = phprs_redis_read_reply_buf(&pong_rb);
+            if (!reply || strstr(reply, "error")) {
+                free((void*)reply);
+                close(fd);
+                phprs_redis_pool_fds[i] = -1;
+                continue;
+            }
+            free((void*)reply);
+            // Reset thread-local read buffer since we used a local one
+            phprs_redis_tl_rdbuf_fd = -1;
+            phprs_redis_pool_used[i] = 1;
+#ifndef _WIN32
+            pthread_mutex_unlock(&phprs_redis_mutex);
+#endif
+            return fd;
+        }
+    }
+    // Create new connection
+    int slot = -1;
+    for (int i = 0; i < PHPRS_REDIS_POOL_SIZE; i++) {
+        if (phprs_redis_pool_fds[i] < 0) { slot = i; break; }
+    }
+    if (slot < 0) {
+        // All slots full, reuse first non-used or fail
+#ifndef _WIN32
+        pthread_mutex_unlock(&phprs_redis_mutex);
+#endif
+        return -1;
+    }
+#ifndef _WIN32
+    pthread_mutex_unlock(&phprs_redis_mutex);
+#endif
+
+    int64_t fd = phprs_tcp_connect(phprs_redis_host, (int64_t)phprs_redis_port);
+    if (fd < 0) return -1;
+
+    // AUTH if password set
+    if (phprs_redis_pass[0]) {
+        const char* argv[] = {"AUTH", phprs_redis_pass};
+        const char* reply = phprs_redis_command_v((int)fd, 2, argv);
+        if (reply && strstr(reply, "error")) {
+            free((void*)reply);
+            close((int)fd);
+            return -1;
+        }
+        free((void*)reply);
+    }
+
+#ifndef _WIN32
+    pthread_mutex_lock(&phprs_redis_mutex);
+#endif
+    phprs_redis_pool_fds[slot] = (int)fd;
+    phprs_redis_pool_used[slot] = 1;
+#ifndef _WIN32
+    pthread_mutex_unlock(&phprs_redis_mutex);
+#endif
+    return (int)fd;
+}
+
+// Release connection back to pool
+static void phprs_redis_release(int fd) {
+#ifndef _WIN32
+    pthread_mutex_lock(&phprs_redis_mutex);
+#endif
+    for (int i = 0; i < PHPRS_REDIS_POOL_SIZE; i++) {
+        if (phprs_redis_pool_fds[i] == fd) {
+            phprs_redis_pool_used[i] = 0;
+            break;
+        }
+    }
+#ifndef _WIN32
+    pthread_mutex_unlock(&phprs_redis_mutex);
+#endif
+}
+
+// Close all pool connections
+void phprs_redis_close(void) {
+#ifndef _WIN32
+    pthread_mutex_lock(&phprs_redis_mutex);
+#endif
+    for (int i = 0; i < PHPRS_REDIS_POOL_SIZE; i++) {
+        if (phprs_redis_pool_fds[i] >= 0) {
+            close(phprs_redis_pool_fds[i]);
+            phprs_redis_pool_fds[i] = -1;
+            phprs_redis_pool_used[i] = 0;
+        }
+    }
+    phprs_redis_pool_inited = 0;
+#ifndef _WIN32
+    pthread_mutex_unlock(&phprs_redis_mutex);
+#endif
+}
+
+// ---- Public PHPRS-callable Redis functions ----
+
+const char* phprs_redis_cmd(const char* cmd_json) {
+    // Parse JSON: {"cmd":"SET","args":["key","val"]} or simple "PING"
+    // For simplicity, accept space-separated command string: "SET mykey myval"
+    if (!cmd_json || !*cmd_json) return strdup("(error) empty command");
+
+    int fd = phprs_redis_acquire();
+    if (fd < 0) return strdup("(error) no connection");
+
+    // Tokenize command
+    char* copy = strdup(cmd_json);
+    const char* argv[64];
+    int argc = 0;
+    char* tok = strtok(copy, " ");
+    while (tok && argc < 64) {
+        argv[argc++] = tok;
+        tok = strtok(NULL, " ");
+    }
+
+    const char* result = phprs_redis_command_v(fd, argc, argv);
+    free(copy);
+    phprs_redis_release(fd);
+    return result;
+}
+
+const char* phprs_redis_get(const char* key) {
+    if (!key || !*key) return strdup("(nil)");
+    int fd = phprs_redis_acquire();
+    if (fd < 0) return strdup("(error) no connection");
+    const char* argv[] = {"GET", key};
+    const char* result = phprs_redis_command_v(fd, 2, argv);
+    phprs_redis_release(fd);
+    return result;
+}
+
+const char* phprs_redis_set(const char* key, const char* value) {
+    if (!key || !*key) return strdup("(error) empty key");
+    if (!value) value = "";
+    int fd = phprs_redis_acquire();
+    if (fd < 0) return strdup("(error) no connection");
+    const char* argv[] = {"SET", key, value};
+    const char* result = phprs_redis_command_v(fd, 3, argv);
+    phprs_redis_release(fd);
+    return result;
+}
+
+const char* phprs_redis_setex(const char* key, int64_t seconds, const char* value) {
+    if (!key || !*key) return strdup("(error) empty key");
+    if (!value) value = "";
+    int fd = phprs_redis_acquire();
+    if (fd < 0) return strdup("(error) no connection");
+    char sec_str[32];
+    snprintf(sec_str, sizeof(sec_str), "%" PRId64, seconds);
+    const char* argv[] = {"SETEX", key, sec_str, value};
+    const char* result = phprs_redis_command_v(fd, 4, argv);
+    phprs_redis_release(fd);
+    return result;
+}
+
+const char* phprs_redis_del(const char* key) {
+    if (!key || !*key) return strdup("0");
+    int fd = phprs_redis_acquire();
+    if (fd < 0) return strdup("(error) no connection");
+    const char* argv[] = {"DEL", key};
+    const char* result = phprs_redis_command_v(fd, 2, argv);
+    phprs_redis_release(fd);
+    return result;
+}
+
+int64_t phprs_redis_exists(const char* key) {
+    if (!key || !*key) return 0;
+    int fd = phprs_redis_acquire();
+    if (fd < 0) return 0;
+    const char* argv[] = {"EXISTS", key};
+    const char* result = phprs_redis_command_v(fd, 2, argv);
+    int64_t val = result ? atoll(result) : 0;
+    free((void*)result);
+    phprs_redis_release(fd);
+    return val;
+}
+
+const char* phprs_redis_keys(const char* pattern) {
+    if (!pattern || !*pattern) pattern = "*";
+    int fd = phprs_redis_acquire();
+    if (fd < 0) return strdup("[]");
+    const char* argv[] = {"KEYS", pattern};
+    const char* result = phprs_redis_command_v(fd, 2, argv);
+    phprs_redis_release(fd);
+    return result;
+}
+
+int64_t phprs_redis_expire(const char* key, int64_t seconds) {
+    if (!key || !*key) return 0;
+    int fd = phprs_redis_acquire();
+    if (fd < 0) return 0;
+    char sec_str[32];
+    snprintf(sec_str, sizeof(sec_str), "%" PRId64, seconds);
+    const char* argv[] = {"EXPIRE", key, sec_str};
+    const char* result = phprs_redis_command_v(fd, 3, argv);
+    int64_t val = result ? atoll(result) : 0;
+    free((void*)result);
+    phprs_redis_release(fd);
+    return val;
+}
+
+int64_t phprs_redis_incr(const char* key) {
+    if (!key || !*key) return 0;
+    int fd = phprs_redis_acquire();
+    if (fd < 0) return 0;
+    const char* argv[] = {"INCR", key};
+    const char* result = phprs_redis_command_v(fd, 2, argv);
+    int64_t val = result ? atoll(result) : 0;
+    free((void*)result);
+    phprs_redis_release(fd);
+    return val;
+}
+
+int64_t phprs_redis_decr(const char* key) {
+    if (!key || !*key) return 0;
+    int fd = phprs_redis_acquire();
+    if (fd < 0) return 0;
+    const char* argv[] = {"DECR", key};
+    const char* result = phprs_redis_command_v(fd, 2, argv);
+    int64_t val = result ? atoll(result) : 0;
+    free((void*)result);
+    phprs_redis_release(fd);
+    return val;
+}
+
+const char* phprs_redis_hget(const char* key, const char* field) {
+    if (!key || !field) return strdup("(nil)");
+    int fd = phprs_redis_acquire();
+    if (fd < 0) return strdup("(error) no connection");
+    const char* argv[] = {"HGET", key, field};
+    const char* result = phprs_redis_command_v(fd, 3, argv);
+    phprs_redis_release(fd);
+    return result;
+}
+
+const char* phprs_redis_hset(const char* key, const char* field, const char* value) {
+    if (!key || !field) return strdup("0");
+    if (!value) value = "";
+    int fd = phprs_redis_acquire();
+    if (fd < 0) return strdup("(error) no connection");
+    const char* argv[] = {"HSET", key, field, value};
+    const char* result = phprs_redis_command_v(fd, 4, argv);
+    phprs_redis_release(fd);
+    return result;
+}
+
+const char* phprs_redis_hgetall(const char* key) {
+    if (!key) return strdup("[]");
+    int fd = phprs_redis_acquire();
+    if (fd < 0) return strdup("(error) no connection");
+    const char* argv[] = {"HGETALL", key};
+    const char* result = phprs_redis_command_v(fd, 2, argv);
+    phprs_redis_release(fd);
+    return result;
+}
+
+const char* phprs_redis_lpush(const char* key, const char* value) {
+    if (!key || !value) return strdup("0");
+    int fd = phprs_redis_acquire();
+    if (fd < 0) return strdup("(error) no connection");
+    const char* argv[] = {"LPUSH", key, value};
+    const char* result = phprs_redis_command_v(fd, 3, argv);
+    phprs_redis_release(fd);
+    return result;
+}
+
+const char* phprs_redis_rpush(const char* key, const char* value) {
+    if (!key || !value) return strdup("0");
+    int fd = phprs_redis_acquire();
+    if (fd < 0) return strdup("(error) no connection");
+    const char* argv[] = {"RPUSH", key, value};
+    const char* result = phprs_redis_command_v(fd, 3, argv);
+    phprs_redis_release(fd);
+    return result;
+}
+
+const char* phprs_redis_lrange(const char* key, int64_t start, int64_t stop) {
+    if (!key) return strdup("[]");
+    int fd = phprs_redis_acquire();
+    if (fd < 0) return strdup("(error) no connection");
+    char s1[32], s2[32];
+    snprintf(s1, sizeof(s1), "%" PRId64, start);
+    snprintf(s2, sizeof(s2), "%" PRId64, stop);
+    const char* argv[] = {"LRANGE", key, s1, s2};
+    const char* result = phprs_redis_command_v(fd, 4, argv);
+    phprs_redis_release(fd);
+    return result;
+}
+
+const char* phprs_redis_ping(void) {
+    int fd = phprs_redis_acquire();
+    if (fd < 0) return strdup("(error) no connection");
+    const char* argv[] = {"PING"};
+    const char* result = phprs_redis_command_v(fd, 1, argv);
+    phprs_redis_release(fd);
+    return result;
+}
+
+int64_t phprs_redis_ttl(const char* key) {
+    if (!key || !*key) return -2;
+    int fd = phprs_redis_acquire();
+    if (fd < 0) return -2;
+    const char* argv[] = {"TTL", key};
+    const char* result = phprs_redis_command_v(fd, 2, argv);
+    int64_t val = result ? atoll(result) : -2;
+    free((void*)result);
+    phprs_redis_release(fd);
+    return val;
+}
+
+const char* phprs_redis_select(int64_t db) {
+    int fd = phprs_redis_acquire();
+    if (fd < 0) return strdup("(error) no connection");
+    char db_str[32];
+    snprintf(db_str, sizeof(db_str), "%" PRId64, db);
+    const char* argv[] = {"SELECT", db_str};
+    const char* result = phprs_redis_command_v(fd, 2, argv);
+    phprs_redis_release(fd);
+    return result;
+}
+
+// ===========================================================================
+// ---- MySQL Client with Connection Pool ----
+// ===========================================================================
+
+#ifdef PHPRS_HAS_MYSQL
+
+static MYSQL* phprs_mysql_create_conn(void) {
+    MYSQL* conn = mysql_init(NULL);
+    if (!conn) return NULL;
+
+    // Set connection timeout
+    unsigned int timeout = 10;
+    mysql_options(conn, MYSQL_OPT_CONNECT_TIMEOUT, &timeout);
+    mysql_options(conn, MYSQL_OPT_READ_TIMEOUT, &timeout);
+
+    // Set charset
+    mysql_options(conn, MYSQL_SET_CHARSET_NAME, "utf8mb4");
+
+    if (!mysql_real_connect(conn, phprs_mysql_host, phprs_mysql_user,
+                            phprs_mysql_pass, phprs_mysql_dbname,
+                            (unsigned int)phprs_mysql_port_val, NULL, 0)) {
+        phprs_log_err("MySQL connect failed: %s", mysql_error(conn));
+        mysql_close(conn);
+        return NULL;
+    }
+    return conn;
+}
+
+void phprs_mysql_init(const char* host, int64_t port, const char* user,
+                      const char* pass, const char* dbname) {
+    if (host && *host) strncpy(phprs_mysql_host, host, sizeof(phprs_mysql_host) - 1);
+    phprs_mysql_port_val = (int)port;
+    if (user && *user) strncpy(phprs_mysql_user, user, sizeof(phprs_mysql_user) - 1);
+    if (pass) strncpy(phprs_mysql_pass, pass, sizeof(phprs_mysql_pass) - 1);
+    if (dbname && *dbname) strncpy(phprs_mysql_dbname, dbname, sizeof(phprs_mysql_dbname) - 1);
+    memset(phprs_mysql_pool_conns, 0, sizeof(phprs_mysql_pool_conns));
+    memset(phprs_mysql_pool_used, 0, sizeof(phprs_mysql_pool_used));
+    phprs_mysql_pool_inited = 1;
+}
+
+static MYSQL* phprs_mysql_acquire(void) {
+    if (!phprs_mysql_pool_inited) phprs_mysql_init("127.0.0.1", 3306, "root", "", "test");
+    pthread_mutex_lock(&phprs_mysql_mutex);
+    // Find a free connection
+    for (int i = 0; i < PHPRS_MYSQL_POOL_SIZE; i++) {
+        if (phprs_mysql_pool_conns[i] && !phprs_mysql_pool_used[i]) {
+            // Ping to check connection health
+            if (mysql_ping(phprs_mysql_pool_conns[i]) == 0) {
+                phprs_mysql_pool_used[i] = 1;
+                pthread_mutex_unlock(&phprs_mysql_mutex);
+                return phprs_mysql_pool_conns[i];
+            } else {
+                // Dead connection, clean up
+                mysql_close(phprs_mysql_pool_conns[i]);
+                phprs_mysql_pool_conns[i] = NULL;
+            }
+        }
+    }
+    // Create new connection in an empty slot
+    int slot = -1;
+    for (int i = 0; i < PHPRS_MYSQL_POOL_SIZE; i++) {
+        if (!phprs_mysql_pool_conns[i]) { slot = i; break; }
+    }
+    pthread_mutex_unlock(&phprs_mysql_mutex);
+    if (slot < 0) return NULL;
+
+    MYSQL* conn = phprs_mysql_create_conn();
+    if (!conn) return NULL;
+
+    pthread_mutex_lock(&phprs_mysql_mutex);
+    phprs_mysql_pool_conns[slot] = conn;
+    phprs_mysql_pool_used[slot] = 1;
+    pthread_mutex_unlock(&phprs_mysql_mutex);
+    return conn;
+}
+
+static void phprs_mysql_release(MYSQL* conn) {
+    pthread_mutex_lock(&phprs_mysql_mutex);
+    for (int i = 0; i < PHPRS_MYSQL_POOL_SIZE; i++) {
+        if (phprs_mysql_pool_conns[i] == conn) {
+            phprs_mysql_pool_used[i] = 0;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&phprs_mysql_mutex);
+}
+
+void phprs_mysql_close(void) {
+    pthread_mutex_lock(&phprs_mysql_mutex);
+    for (int i = 0; i < PHPRS_MYSQL_POOL_SIZE; i++) {
+        if (phprs_mysql_pool_conns[i]) {
+            mysql_close(phprs_mysql_pool_conns[i]);
+            phprs_mysql_pool_conns[i] = NULL;
+            phprs_mysql_pool_used[i] = 0;
+        }
+    }
+    phprs_mysql_pool_inited = 0;
+    pthread_mutex_unlock(&phprs_mysql_mutex);
+}
+
+// Escape a string for safe SQL inclusion
+const char* phprs_mysql_escape(const char* s) {
+    if (!s) return strdup("");
+    MYSQL* conn = phprs_mysql_acquire();
+    if (!conn) {
+        // Fallback: basic manual escape
+        size_t len = strlen(s);
+        char* out = malloc(len * 2 + 1);
+        size_t j = 0;
+        for (size_t i = 0; i < len; i++) {
+            if (s[i] == '\'' || s[i] == '\\' || s[i] == '"') out[j++] = '\\';
+            out[j++] = s[i];
+        }
+        out[j] = '\0';
+        return out;
+    }
+    size_t len = strlen(s);
+    char* out = malloc(len * 2 + 1);
+    mysql_real_escape_string(conn, out, s, (unsigned long)len);
+    phprs_mysql_release(conn);
+    return out;
+}
+
+// Execute a query that returns rows — returns JSON array of objects
+const char* phprs_mysql_query(const char* sql) {
+    if (!sql || !*sql) return strdup("[]");
+    MYSQL* conn = phprs_mysql_acquire();
+    if (!conn) return strdup("{\"error\":\"no connection\"}");
+
+    if (mysql_query(conn, sql) != 0) {
+        const char* err = mysql_error(conn);
+        char* result = malloc(strlen(err) + 32);
+        sprintf(result, "{\"error\":\"%s\"}", err ? err : "unknown");
+        phprs_mysql_release(conn);
+        return result;
+    }
+
+    MYSQL_RES* res = mysql_store_result(conn);
+    if (!res) {
+        // Non-SELECT statement (INSERT, UPDATE, DELETE)
+        my_ulonglong affected = mysql_affected_rows(conn);
+        my_ulonglong insert_id = mysql_insert_id(conn);
+        char* result = malloc(128);
+        sprintf(result, "{\"affected_rows\":%llu,\"insert_id\":%llu}",
+                (unsigned long long)affected, (unsigned long long)insert_id);
+        phprs_mysql_release(conn);
+        return result;
+    }
+
+    unsigned int num_fields = mysql_num_fields(res);
+    MYSQL_FIELD* fields = mysql_fetch_fields(res);
+
+    // Build JSON array
+    size_t cap = 1024;
+    char* json = malloc(cap);
+    strcpy(json, "[");
+    size_t json_len = 1;
+    int row_idx = 0;
+
+    MYSQL_ROW row;
+    while ((row = mysql_fetch_row(res))) {
+        unsigned long* lengths = mysql_fetch_lengths(res);
+        if (row_idx > 0) { json[json_len++] = ','; }
+        json[json_len++] = '{';
+
+        for (unsigned int i = 0; i < num_fields; i++) {
+            if (i > 0) { json[json_len++] = ','; }
+
+            // "field_name":
+            const char* fname = fields[i].name;
+            size_t fname_len = strlen(fname);
+            size_t need = json_len + fname_len + 4 + (row[i] ? lengths[i] * 2 : 4) + 16;
+            if (need > cap) { cap = need * 2; json = realloc(json, cap); }
+
+            json[json_len++] = '"';
+            memcpy(json + json_len, fname, fname_len); json_len += fname_len;
+            json[json_len++] = '"';
+            json[json_len++] = ':';
+
+            if (!row[i]) {
+                memcpy(json + json_len, "null", 4); json_len += 4;
+            } else {
+                // Check if numeric type
+                int is_num = (fields[i].type == MYSQL_TYPE_TINY ||
+                              fields[i].type == MYSQL_TYPE_SHORT ||
+                              fields[i].type == MYSQL_TYPE_LONG ||
+                              fields[i].type == MYSQL_TYPE_LONGLONG ||
+                              fields[i].type == MYSQL_TYPE_INT24 ||
+                              fields[i].type == MYSQL_TYPE_FLOAT ||
+                              fields[i].type == MYSQL_TYPE_DOUBLE ||
+                              fields[i].type == MYSQL_TYPE_DECIMAL ||
+                              fields[i].type == MYSQL_TYPE_NEWDECIMAL);
+                if (is_num) {
+                    size_t vlen = lengths[i];
+                    need = json_len + vlen + 4;
+                    if (need > cap) { cap = need * 2; json = realloc(json, cap); }
+                    memcpy(json + json_len, row[i], vlen); json_len += vlen;
+                } else {
+                    json[json_len++] = '"';
+                    // Escape string value
+                    for (unsigned long j = 0; j < lengths[i]; j++) {
+                        if (json_len + 4 > cap) { cap *= 2; json = realloc(json, cap); }
+                        char c = row[i][j];
+                        if (c == '"') { json[json_len++] = '\\'; json[json_len++] = '"'; }
+                        else if (c == '\\') { json[json_len++] = '\\'; json[json_len++] = '\\'; }
+                        else if (c == '\n') { json[json_len++] = '\\'; json[json_len++] = 'n'; }
+                        else if (c == '\r') { json[json_len++] = '\\'; json[json_len++] = 'r'; }
+                        else if (c == '\t') { json[json_len++] = '\\'; json[json_len++] = 't'; }
+                        else { json[json_len++] = c; }
+                    }
+                    if (json_len + 2 > cap) { cap *= 2; json = realloc(json, cap); }
+                    json[json_len++] = '"';
+                }
+            }
+        }
+        if (json_len + 2 > cap) { cap *= 2; json = realloc(json, cap); }
+        json[json_len++] = '}';
+        row_idx++;
+    }
+    if (json_len + 2 > cap) { cap = json_len + 4; json = realloc(json, cap); }
+    json[json_len++] = ']';
+    json[json_len] = '\0';
+
+    mysql_free_result(res);
+    phprs_mysql_release(conn);
+    return json;
+}
+
+// Execute a non-SELECT statement (INSERT, UPDATE, DELETE)
+const char* phprs_mysql_exec(const char* sql) {
+    return phprs_mysql_query(sql);
+}
+
+// Convenience: SELECT with parameterized values (simple printf-style)
+const char* phprs_mysql_select(const char* table, const char* where_clause) {
+    if (!table || !*table) return strdup("[]");
+    size_t cap = 256 + (where_clause ? strlen(where_clause) : 0) + strlen(table);
+    char* sql = malloc(cap);
+    if (where_clause && *where_clause) {
+        snprintf(sql, cap, "SELECT * FROM %s WHERE %s", table, where_clause);
+    } else {
+        snprintf(sql, cap, "SELECT * FROM %s", table);
+    }
+    const char* result = phprs_mysql_query(sql);
+    free(sql);
+    return result;
+}
+
+// Convenience: INSERT (JSON object → INSERT INTO table SET field=val, ...)
+const char* phprs_mysql_insert(const char* table, const char* json_data) {
+    if (!table || !*table || !json_data || !*json_data) return strdup("{\"error\":\"bad args\"}");
+
+    // Parse json_data: {"name":"val","age":25}
+    // Build: INSERT INTO table (col1,col2) VALUES ('v1','v2')
+    size_t cap = 1024 + strlen(json_data) * 3;
+    char* cols = malloc(cap);
+    char* vals = malloc(cap);
+    cols[0] = vals[0] = '\0';
+    int first = 1;
+
+    const char* p = json_data;
+    while (*p) {
+        // Find "key":
+        const char* kstart = strchr(p, '"');
+        if (!kstart) break;
+        kstart++;
+        const char* kend = strchr(kstart, '"');
+        if (!kend) break;
+        size_t klen = (size_t)(kend - kstart);
+
+        // Find value after ':'
+        const char* colon = strchr(kend + 1, ':');
+        if (!colon) break;
+        colon++;
+        while (*colon == ' ') colon++;
+
+        char key[256];
+        if (klen >= sizeof(key)) klen = sizeof(key) - 1;
+        memcpy(key, kstart, klen); key[klen] = '\0';
+
+        if (!first) { strcat(cols, ","); strcat(vals, ","); }
+        strcat(cols, "`"); strcat(cols, key); strcat(cols, "`");
+
+        if (*colon == '"') {
+            // String value
+            colon++;
+            const char* vend = colon;
+            while (*vend && !(*vend == '"' && *(vend-1) != '\\')) vend++;
+            size_t vlen = (size_t)(vend - colon);
+            char* val = malloc(vlen + 1);
+            memcpy(val, colon, vlen); val[vlen] = '\0';
+            const char* escaped = phprs_mysql_escape(val);
+            strcat(vals, "'"); strcat(vals, escaped); strcat(vals, "'");
+            free(val);
+            free((void*)escaped);
+            p = (*vend) ? vend + 1 : vend;
+        } else if (*colon == 'n' && strncmp(colon, "null", 4) == 0) {
+            strcat(vals, "NULL");
+            p = colon + 4;
+        } else {
+            // Numeric value
+            const char* vstart = colon;
+            while (*colon && *colon != ',' && *colon != '}') colon++;
+            size_t vlen = (size_t)(colon - vstart);
+            char val[64];
+            if (vlen >= sizeof(val)) vlen = sizeof(val) - 1;
+            memcpy(val, vstart, vlen); val[vlen] = '\0';
+            strcat(vals, val);
+            p = colon;
+        }
+        first = 0;
+    }
+
+    char* sql = malloc(cap + strlen(cols) + strlen(vals) + 64);
+    sprintf(sql, "INSERT INTO %s (%s) VALUES (%s)", table, cols, vals);
+    const char* result = phprs_mysql_query(sql);
+    free(cols); free(vals); free(sql);
+    return result;
+}
+
+// Convenience: UPDATE
+const char* phprs_mysql_update(const char* table, const char* set_clause, const char* where_clause) {
+    if (!table || !*table || !set_clause || !*set_clause) return strdup("{\"error\":\"bad args\"}");
+    size_t cap = 256 + strlen(table) + strlen(set_clause) + (where_clause ? strlen(where_clause) : 0);
+    char* sql = malloc(cap);
+    if (where_clause && *where_clause) {
+        snprintf(sql, cap, "UPDATE %s SET %s WHERE %s", table, set_clause, where_clause);
+    } else {
+        snprintf(sql, cap, "UPDATE %s SET %s", table, set_clause);
+    }
+    const char* result = phprs_mysql_query(sql);
+    free(sql);
+    return result;
+}
+
+// Convenience: DELETE
+const char* phprs_mysql_delete(const char* table, const char* where_clause) {
+    if (!table || !*table) return strdup("{\"error\":\"bad args\"}");
+    size_t cap = 256 + strlen(table) + (where_clause ? strlen(where_clause) : 0);
+    char* sql = malloc(cap);
+    if (where_clause && *where_clause) {
+        snprintf(sql, cap, "DELETE FROM %s WHERE %s", table, where_clause);
+    } else {
+        snprintf(sql, cap, "DELETE FROM %s", table);
+    }
+    const char* result = phprs_mysql_query(sql);
+    free(sql);
+    return result;
+}
+
+#else
+// ---- MySQL stubs when libmysqlclient is not available ----
+void phprs_mysql_init(const char* h, int64_t p, const char* u, const char* pw, const char* db) {
+    (void)h; (void)p; (void)u; (void)pw; (void)db;
+    if (h && *h) strncpy(phprs_mysql_host, h, sizeof(phprs_mysql_host) - 1);
+    phprs_mysql_port_val = (int)p;
+    if (u && *u) strncpy(phprs_mysql_user, u, sizeof(phprs_mysql_user) - 1);
+    if (pw) strncpy(phprs_mysql_pass, pw, sizeof(phprs_mysql_pass) - 1);
+    if (db && *db) strncpy(phprs_mysql_dbname, db, sizeof(phprs_mysql_dbname) - 1);
+    phprs_mysql_pool_inited = 1;
+}
+void phprs_mysql_close(void) { phprs_mysql_pool_inited = 0; }
+const char* phprs_mysql_escape(const char* s) {
+    if (!s) return strdup("");
+    size_t len = strlen(s);
+    char* out = malloc(len * 2 + 1);
+    size_t j = 0;
+    for (size_t i = 0; i < len; i++) {
+        if (s[i] == '\'' || s[i] == '\\' || s[i] == '"') out[j++] = '\\';
+        out[j++] = s[i];
+    }
+    out[j] = '\0';
+    return out;
+}
+const char* phprs_mysql_query(const char* sql) { (void)sql; return strdup("{\"error\":\"MySQL not available — compile with -DPHPRS_HAS_MYSQL -lmysqlclient\"}"); }
+const char* phprs_mysql_exec(const char* sql) { return phprs_mysql_query(sql); }
+const char* phprs_mysql_select(const char* t, const char* w) { (void)t; (void)w; return phprs_mysql_query(""); }
+const char* phprs_mysql_insert(const char* t, const char* d) { (void)t; (void)d; return phprs_mysql_query(""); }
+const char* phprs_mysql_update(const char* t, const char* s, const char* w) { (void)t; (void)s; (void)w; return phprs_mysql_query(""); }
+const char* phprs_mysql_delete(const char* t, const char* w) { (void)t; (void)w; return phprs_mysql_query(""); }
+#endif
+
+// ===========================================================================
+// ---- WebSocket Connection Manager + Heartbeat ----
+// ===========================================================================
+
+void phprs_ws_manager_init(int64_t heartbeat_sec) {
+    phprs_ws_heartbeat_sec = (int)(heartbeat_sec > 0 ? heartbeat_sec : 30);
+#ifndef _WIN32
+    pthread_mutex_lock(&phprs_ws_mutex);
+#endif
+    memset(phprs_ws_clients, 0, sizeof(phprs_ws_clients));
+    phprs_ws_client_count = 0;
+#ifndef _WIN32
+    pthread_mutex_unlock(&phprs_ws_mutex);
+#endif
+}
+
+int64_t phprs_ws_register(int64_t fd, const char* room) {
+#ifndef _WIN32
+    pthread_mutex_lock(&phprs_ws_mutex);
+#endif
+    int slot = -1;
+    for (int i = 0; i < PHPRS_WS_MAX_CLIENTS; i++) {
+        if (!phprs_ws_clients[i].active) { slot = i; break; }
+    }
+    if (slot < 0) {
+#ifndef _WIN32
+        pthread_mutex_unlock(&phprs_ws_mutex);
+#endif
+        return -1;
+    }
+    phprs_ws_clients[slot].fd = fd;
+    phprs_ws_clients[slot].active = 1;
+    phprs_ws_clients[slot].last_pong = time(NULL);
+    if (room && *room) {
+        strncpy(phprs_ws_clients[slot].room, room, sizeof(phprs_ws_clients[slot].room) - 1);
+        phprs_ws_clients[slot].room[sizeof(phprs_ws_clients[slot].room) - 1] = '\0';
+    } else {
+        strcpy(phprs_ws_clients[slot].room, "default");
+    }
+    phprs_ws_client_count++;
+#ifndef _WIN32
+    pthread_mutex_unlock(&phprs_ws_mutex);
+#endif
+    return (int64_t)slot;
+}
+
+void phprs_ws_unregister(int64_t fd) {
+#ifndef _WIN32
+    pthread_mutex_lock(&phprs_ws_mutex);
+#endif
+    for (int i = 0; i < PHPRS_WS_MAX_CLIENTS; i++) {
+        if (phprs_ws_clients[i].active && phprs_ws_clients[i].fd == fd) {
+            phprs_ws_clients[i].active = 0;
+            phprs_ws_clients[i].fd = -1;
+            phprs_ws_clients[i].room[0] = '\0';
+            if (phprs_ws_client_count > 0) phprs_ws_client_count--;
+            break;
+        }
+    }
+#ifndef _WIN32
+    pthread_mutex_unlock(&phprs_ws_mutex);
+#endif
+}
+
+void phprs_ws_update_pong(int64_t fd) {
+#ifndef _WIN32
+    pthread_mutex_lock(&phprs_ws_mutex);
+#endif
+    for (int i = 0; i < PHPRS_WS_MAX_CLIENTS; i++) {
+        if (phprs_ws_clients[i].active && phprs_ws_clients[i].fd == fd) {
+            phprs_ws_clients[i].last_pong = time(NULL);
+            break;
+        }
+    }
+#ifndef _WIN32
+    pthread_mutex_unlock(&phprs_ws_mutex);
+#endif
+}
+
+// Broadcast a text message to all clients in a room
+int64_t phprs_ws_broadcast(const char* room, const char* message, int64_t exclude_fd) {
+    if (!message) return 0;
+    if (!room || !*room) room = "default";
+    int64_t sent = 0;
+#ifndef _WIN32
+    pthread_mutex_lock(&phprs_ws_mutex);
+#endif
+    for (int i = 0; i < PHPRS_WS_MAX_CLIENTS; i++) {
+        if (phprs_ws_clients[i].active && phprs_ws_clients[i].fd != exclude_fd) {
+            if (strcmp(phprs_ws_clients[i].room, room) == 0) {
+                int64_t r = phprs_ws_write_frame(phprs_ws_clients[i].fd, message, 1);
+                if (r > 0) sent++;
+            }
+        }
+    }
+#ifndef _WIN32
+    pthread_mutex_unlock(&phprs_ws_mutex);
+#endif
+    return sent;
+}
+
+// Send message to all connected clients (all rooms)
+int64_t phprs_ws_broadcast_all(const char* message, int64_t exclude_fd) {
+    if (!message) return 0;
+    int64_t sent = 0;
+#ifndef _WIN32
+    pthread_mutex_lock(&phprs_ws_mutex);
+#endif
+    for (int i = 0; i < PHPRS_WS_MAX_CLIENTS; i++) {
+        if (phprs_ws_clients[i].active && phprs_ws_clients[i].fd != exclude_fd) {
+            int64_t r = phprs_ws_write_frame(phprs_ws_clients[i].fd, message, 1);
+            if (r > 0) sent++;
+        }
+    }
+#ifndef _WIN32
+    pthread_mutex_unlock(&phprs_ws_mutex);
+#endif
+    return sent;
+}
+
+// Get count of active connections (optionally in a specific room)
+int64_t phprs_ws_count(const char* room) {
+    int64_t n = 0;
+#ifndef _WIN32
+    pthread_mutex_lock(&phprs_ws_mutex);
+#endif
+    if (!room || !*room) {
+        n = phprs_ws_client_count;
+    } else {
+        for (int i = 0; i < PHPRS_WS_MAX_CLIENTS; i++) {
+            if (phprs_ws_clients[i].active && strcmp(phprs_ws_clients[i].room, room) == 0) {
+                n++;
+            }
+        }
+    }
+#ifndef _WIN32
+    pthread_mutex_unlock(&phprs_ws_mutex);
+#endif
+    return n;
+}
+
+// Get list of rooms as JSON array
+const char* phprs_ws_rooms(void) {
+    char* result = malloc(4096);
+    strcpy(result, "[");
+    int first = 1;
+    // Collect unique rooms
+    char seen[64][128];
+    int seen_count = 0;
+#ifndef _WIN32
+    pthread_mutex_lock(&phprs_ws_mutex);
+#endif
+    for (int i = 0; i < PHPRS_WS_MAX_CLIENTS; i++) {
+        if (!phprs_ws_clients[i].active) continue;
+        int found = 0;
+        for (int j = 0; j < seen_count; j++) {
+            if (strcmp(seen[j], phprs_ws_clients[i].room) == 0) { found = 1; break; }
+        }
+        if (!found && seen_count < 64) {
+            strncpy(seen[seen_count], phprs_ws_clients[i].room, 127);
+            seen[seen_count][127] = '\0';
+            seen_count++;
+        }
+    }
+#ifndef _WIN32
+    pthread_mutex_unlock(&phprs_ws_mutex);
+#endif
+    for (int j = 0; j < seen_count; j++) {
+        if (!first) strcat(result, ",");
+        strcat(result, "\"");
+        strcat(result, seen[j]);
+        strcat(result, "\"");
+        first = 0;
+    }
+    strcat(result, "]");
+    return result;
+}
+
+// Heartbeat thread: sends Ping to all clients, disconnects stale ones
+static PHPRS_THREAD_RETURN phprs_ws_heartbeat_worker(void* arg) {
+    (void)arg;
+    while (!phprs_shutting_down) {
+        sleep((unsigned int)phprs_ws_heartbeat_sec);
+        if (phprs_shutting_down) break;
+
+        time_t now = time(NULL);
+#ifndef _WIN32
+        pthread_mutex_lock(&phprs_ws_mutex);
+#endif
+        for (int i = 0; i < PHPRS_WS_MAX_CLIENTS; i++) {
+            if (!phprs_ws_clients[i].active) continue;
+
+            // Check if last pong is too old (3x heartbeat interval = dead)
+            if (now - phprs_ws_clients[i].last_pong > phprs_ws_heartbeat_sec * 3) {
+                // Connection is dead — close it
+                int64_t fd = phprs_ws_clients[i].fd;
+                phprs_ws_clients[i].active = 0;
+                phprs_ws_clients[i].fd = -1;
+                if (phprs_ws_client_count > 0) phprs_ws_client_count--;
+#ifndef _WIN32
+                pthread_mutex_unlock(&phprs_ws_mutex);
+#endif
+                phprs_ws_close(fd);
+#ifndef _WIN32
+                pthread_mutex_lock(&phprs_ws_mutex);
+#endif
+                continue;
+            }
+
+            // Send Ping frame
+            unsigned char ping_frame[] = { 0x89, 0x00 };
+#ifdef _WIN32
+            send((SOCKET)phprs_ws_clients[i].fd, (const char*)ping_frame, 2, 0);
+#else
+            send((int)phprs_ws_clients[i].fd, ping_frame, 2, MSG_NOSIGNAL);
+#endif
+        }
+#ifndef _WIN32
+        pthread_mutex_unlock(&phprs_ws_mutex);
+#endif
+    }
+    return PHPRS_THREAD_RETVAL;
+}
+
+// Start the heartbeat background thread
+void phprs_ws_start_heartbeat(int64_t interval_sec) {
+    phprs_ws_heartbeat_sec = (int)(interval_sec > 0 ? interval_sec : 30);
+#ifdef _WIN32
+    _beginthreadex(NULL, 0, phprs_ws_heartbeat_worker, NULL, 0, NULL);
+#else
+    pthread_t tid;
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    pthread_create(&tid, &attr, phprs_ws_heartbeat_worker, NULL);
+    pthread_attr_destroy(&attr);
+#endif
 }

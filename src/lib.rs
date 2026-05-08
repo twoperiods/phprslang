@@ -131,6 +131,53 @@ fn try_gcc(c_path: &std::path::Path, output: &str) -> Result<(), String> {
                         }
                     }
                     cmd.arg("-lssl").arg("-lcrypto").arg("-lpthread");
+
+                    // MySQL client support (optional — only if libmysqlclient is found)
+                    if cfg!(target_os = "macos") {
+                        let mysql_paths = [
+                            "/opt/homebrew/opt/mysql-client/include",
+                            "/opt/homebrew/opt/mysql@5.7/include",
+                            "/opt/homebrew/opt/mysql/include",
+                            "/usr/local/opt/mysql-client/include",
+                            "/usr/local/opt/mysql@5.7/include",
+                        ];
+                        let mysql_lib_paths = [
+                            "/opt/homebrew/opt/mysql-client/lib",
+                            "/opt/homebrew/opt/mysql@5.7/lib",
+                            "/opt/homebrew/opt/mysql/lib",
+                            "/usr/local/opt/mysql-client/lib",
+                            "/usr/local/opt/mysql@5.7/lib",
+                        ];
+                        for (inc, lib) in mysql_paths.iter().zip(mysql_lib_paths.iter()) {
+                            let mysql_h = format!("{}/mysql/mysql.h", inc);
+                            if std::path::Path::new(&mysql_h).exists() {
+                                cmd.arg("-DPHPRS_HAS_MYSQL");
+                                cmd.arg(format!("-I{}", inc));
+                                cmd.arg(format!("-L{}", lib));
+                                cmd.arg("-lmysqlclient");
+                                break;
+                            }
+                        }
+                    } else {
+                        // Linux: check if mysql_config exists
+                        if let Ok(output) = std::process::Command::new("mysql_config").arg("--cflags").output() {
+                            if output.status.success() {
+                                let cflags = String::from_utf8_lossy(&output.stdout);
+                                for flag in cflags.trim().split_whitespace() {
+                                    cmd.arg(flag);
+                                }
+                                cmd.arg("-DPHPRS_HAS_MYSQL");
+                                if let Ok(libs) = std::process::Command::new("mysql_config").arg("--libs").output() {
+                                    if libs.status.success() {
+                                        let lflags = String::from_utf8_lossy(&libs.stdout);
+                                        for flag in lflags.trim().split_whitespace() {
+                                            cmd.arg(flag);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
                 let status = cmd.status()
                     .map_err(|e| format!("Failed to run {}: {}", compiler, e))?;

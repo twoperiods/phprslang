@@ -170,12 +170,19 @@ function app_dispatch(string $method, string $path, string $raw, string $routes,
     if ($h == "db_create")     {{ return db_create($raw); }}
     if ($h == "db_update")     {{ return db_update($raw); }}
     if ($h == "db_delete")     {{ return db_delete($p); }}
+    if ($h == "db_raw_query")  {{ return db_raw_query($p); }}
 
     // Redis KV
     if ($h == "redis_set")     {{ return redis_set($raw); }}
     if ($h == "redis_get")     {{ return redis_get($p); }}
     if ($h == "redis_del")     {{ return redis_del($p); }}
     if ($h == "redis_keys")    {{ return redis_keys(); }}
+    if ($h == "redis_incr")    {{ return redis_incr($p); }}
+    if ($h == "redis_hset")    {{ return redis_hset($raw); }}
+    if ($h == "redis_hgetall") {{ return redis_hgetall($p); }}
+    if ($h == "redis_lpush")   {{ return redis_lpush($raw); }}
+    if ($h == "redis_lrange")  {{ return redis_lrange($p); }}
+    if ($h == "redis_cmd")     {{ return redis_cmd($p); }}
 
     // WebSocket
     if ($h == "api_ws_info")   {{ return ws_info_page(); }}
@@ -200,12 +207,19 @@ function app_routes(): string {{
     $R = route_add($R, "POST", "/api/db/create", "db_create");
     $R = route_add($R, "POST", "/api/db/update", "db_update");
     $R = route_add($R, "POST", "/api/db/delete?id={{any}}", "db_delete");
+    $R = route_add($R, "POST", "/api/db/query?sql={{any}}", "db_raw_query");
 
     // Redis KV
     $R = route_add($R, "POST", "/api/redis/set", "redis_set");
     $R = route_add($R, "GET", "/api/redis/get?key={{any}}", "redis_get");
     $R = route_add($R, "POST", "/api/redis/del?key={{any}}", "redis_del");
     $R = route_add($R, "GET", "/api/redis/keys", "redis_keys");
+    $R = route_add($R, "POST", "/api/redis/incr?key={{any}}", "redis_incr");
+    $R = route_add($R, "POST", "/api/redis/hset", "redis_hset");
+    $R = route_add($R, "GET", "/api/redis/hgetall?key={{any}}", "redis_hgetall");
+    $R = route_add($R, "POST", "/api/redis/lpush", "redis_lpush");
+    $R = route_add($R, "GET", "/api/redis/lrange?key={{any}}", "redis_lrange");
+    $R = route_add($R, "GET", "/api/redis/cmd?cmd={{any}}", "redis_cmd");
 
     // WebSocket
     $R = route_add($R, "GET", "/api/ws/info", "api_ws_info");
@@ -266,6 +280,11 @@ function app_main(): void {{
     phprs_config_max_connections(10000); // max 10000 concurrent connections
     phprs_log_init("-");                 // access log to stdout
 
+    // ---- Redis / MySQL / WebSocket ----
+    phprs_redis_init("127.0.0.1", 6379, "redis_123");
+    phprs_mysql_init("127.0.0.1", 3306, "root", "boboshanghai", "test");
+    phprs_ws_manager_init(30);           // 30s heartbeat interval
+
     // ---- Middleware Config ----
     rate_limit_config(100, 60);   // 100 req/min per IP
     cors_config("http://localhost:8080", "GET,POST,PUT,DELETE,PATCH,OPTIONS", "Content-Type,Authorization");
@@ -287,12 +306,18 @@ function app_main(): void {{
     // Initialize thread pool with 8 worker threads
     phprs_thread_pool_init(8);
 
+    // Start WebSocket heartbeat background thread
+    phprs_ws_start_heartbeat(30);
+
     echo "============================================\n";
     echo "  {0} - PHPRS MVC Application\n";
     echo "  Server: http://0.0.0.0:" . $port . "\n";
     echo "  Workers: 8 threads\n";
     echo "  Max body: 10 MB\n";
     echo "  Timeouts: read=30s write=60s\n";
+    echo "  Redis:  127.0.0.1:6379\n";
+    echo "  MySQL:  127.0.0.1:3306/test\n";
+    echo "  WS heartbeat: 30s\n";
     echo "  Endpoints: /health /metrics\n";
     echo "  Ctrl+C for graceful shutdown.\n";
     echo "============================================\n";
@@ -333,6 +358,8 @@ function app_main(): void {{
 
     echo "\nGraceful shutdown: draining thread pool...\n";
     phprs_thread_pool_shutdown();
+    phprs_redis_close();
+    phprs_mysql_close();
     phprs_socket_close($sock);
     echo "Server stopped.\n";
 }}
@@ -505,6 +532,51 @@ extern function phprs_log_error_msg(string $msg): void;
 extern function phprs_log_init(string $path): void;
 extern function phprs_server_init_signals(): void;
 extern function phprs_write_pidfile(string $path): void;
+
+// ---- Redis Client ----
+extern function phprs_redis_init(string $host, int $port, string $password): void;
+extern function phprs_redis_close(): void;
+extern function phprs_redis_cmd(string $command): string;
+extern function phprs_redis_get(string $key): string;
+extern function phprs_redis_set(string $key, string $value): string;
+extern function phprs_redis_setex(string $key, int $seconds, string $value): string;
+extern function phprs_redis_del(string $key): string;
+extern function phprs_redis_exists(string $key): int;
+extern function phprs_redis_keys(string $pattern): string;
+extern function phprs_redis_expire(string $key, int $seconds): int;
+extern function phprs_redis_incr(string $key): int;
+extern function phprs_redis_decr(string $key): int;
+extern function phprs_redis_hget(string $key, string $field): string;
+extern function phprs_redis_hset(string $key, string $field, string $value): string;
+extern function phprs_redis_hgetall(string $key): string;
+extern function phprs_redis_lpush(string $key, string $value): string;
+extern function phprs_redis_rpush(string $key, string $value): string;
+extern function phprs_redis_lrange(string $key, int $start, int $stop): string;
+extern function phprs_redis_ping(): string;
+extern function phprs_redis_ttl(string $key): int;
+extern function phprs_redis_select(int $db): string;
+
+// ---- MySQL Client ----
+extern function phprs_mysql_init(string $host, int $port, string $user, string $pass, string $dbname): void;
+extern function phprs_mysql_close(): void;
+extern function phprs_mysql_escape(string $s): string;
+extern function phprs_mysql_query(string $sql): string;
+extern function phprs_mysql_exec(string $sql): string;
+extern function phprs_mysql_select(string $table, string $where_clause): string;
+extern function phprs_mysql_insert(string $table, string $json_data): string;
+extern function phprs_mysql_update(string $table, string $set_clause, string $where_clause): string;
+extern function phprs_mysql_delete(string $table, string $where_clause): string;
+
+// ---- WebSocket Connection Manager ----
+extern function phprs_ws_manager_init(int $heartbeat_sec): void;
+extern function phprs_ws_register(int $fd, string $room): int;
+extern function phprs_ws_unregister(int $fd): void;
+extern function phprs_ws_update_pong(int $fd): void;
+extern function phprs_ws_broadcast(string $room, string $message, int $exclude_fd): int;
+extern function phprs_ws_broadcast_all(string $message, int $exclude_fd): int;
+extern function phprs_ws_count(string $room): int;
+extern function phprs_ws_rooms(): string;
+extern function phprs_ws_start_heartbeat(int $interval_sec): void;
 ?>"##;
 
 // ---- Default Home Controller ----
@@ -648,67 +720,35 @@ function api_upload(string $raw): string {
 
 // ---- Database Controller ----
 const DB_CONTROLLER: &str = r##"<?phprs
-// Database Controller — CRUD operations using JSON file storage as a database layer.
-// In production, replace the file-backed functions with actual DB driver calls.
-// Includes config/database.phprs for connection configuration.
+// Database Controller — CRUD operations using real MySQL driver.
+// Uses phprs_mysql_* functions for direct MySQL queries.
 
 include "../config/database.phprs";
-
-// Internal: load records from JSON file storage (simulates a DB table).
-// In production, replace with: phprs_db_query($conn, "SELECT * FROM items")
-function db_storage_path(): string {
-    return "data/records.json";
-}
-
-function db_load_all(): string {
-    let $path = db_storage_path();
-    if (file_exists($path) == false) {
-        return "[]";
-    }
-    return file_get_contents($path);
-}
-
-function db_save_all(string $json): int {
-    return file_put_contents(db_storage_path(), $json);
-}
-
-// Generate a simple unique ID (timestamp-based, prefixed).
-function db_new_id(): string {
-    return uniqid("rec_");
-}
 
 // ---- Public API Handlers ----
 
 // GET /api/db/list — list all records
 function db_list(): string {
-    let $rows = db_load_all();
-    if ($rows == "") {
-        $rows = "[]";
-    }
-    let $count = db_record_count($rows);
-    let $config = db_mysql();  // Show active DB config
+    let $rows = phprs_mysql_select("items", "");
     let $data = json_encode([
-        "driver"=>phprs_json_get_string($config, "driver"),
-        "host"=>phprs_json_get_string($config, "host"),
-        "database"=>phprs_json_get_string($config, "database"),
-        "count"=>$count,
+        "driver"=>"mysql",
         "rows"=>$rows
     ]);
     return api_response(200, "OK", $data);
 }
 
-// GET /api/db/read?id=rec_xxx — read a single record by ID
+// GET /api/db/read?id=xxx — read a single record by ID
 function db_read(string $params): string {
     let $id = route_param($params, "id");
     if ($id == "") {
         return api_error(400, "Missing id parameter");
     }
-    let $rows_json = db_load_all();
-    let $row = db_find_by_id($rows_json, $id);
-    if ($row == "") {
+    let $escaped_id = phprs_mysql_escape($id);
+    let $rows = phprs_mysql_select("items", "id='" . $escaped_id . "'");
+    if ($rows == "[]" || $rows == "") {
         return api_error(404, "Record not found: " . $id);
     }
-    let $data = json_encode(["record"=>$row]);
+    let $data = json_encode(["record"=>$rows]);
     return api_response(200, "OK", $data);
 }
 
@@ -735,25 +775,14 @@ function db_create(string $raw): string {
     if ($name == "") { $name = "Anonymous"; }
     if ($title == "") { $title = "Untitled"; }
 
-    let $id = db_new_id();
-    let $ts = time();
-    let $new_row = json_encode([
-        "id"=>$id,
+    let $json_data = json_encode([
         "name"=>$name,
         "email"=>$email,
-        "title"=>$title,
-        "created_at"=>$ts,
-        "updated_at"=>$ts
+        "title"=>$title
     ]);
+    let $result = phprs_mysql_insert("items", $json_data);
 
-    let $rows_json = db_load_all();
-    let $updated = db_append_record($rows_json, $new_row);
-    let $written = db_save_all($updated);
-    if ($written < 0) {
-        return api_error(500, "Failed to save record");
-    }
-
-    let $data = json_encode(["message"=>"Created", "record"=>$new_row]);
+    let $data = json_encode(["message"=>"Created", "result"=>$result]);
     return api_response(201, "Created", $data);
 }
 
@@ -784,249 +813,81 @@ function db_update(string $raw): string {
         return api_error(400, "Missing id");
     }
 
-    let $rows_json = db_load_all();
-    let $existing = db_find_by_id($rows_json, $id);
-    if ($existing == "") {
-        return api_error(404, "Record not found: " . $id);
+    let mut $set_parts = "";
+    if ($name != "") {
+        let $esc_name = phprs_mysql_escape($name);
+        $set_parts = $set_parts . "name='" . $esc_name . "'";
+    }
+    if ($email != "") {
+        if ($set_parts != "") { $set_parts = $set_parts . ","; }
+        let $esc_email = phprs_mysql_escape($email);
+        $set_parts = $set_parts . "email='" . $esc_email . "'";
+    }
+    if ($title != "") {
+        if ($set_parts != "") { $set_parts = $set_parts . ","; }
+        let $esc_title = phprs_mysql_escape($title);
+        $set_parts = $set_parts . "title='" . $esc_title . "'";
     }
 
-    let $ts = time();
-    if ($name == "") { $name = phprs_json_get_string($existing, "name"); }
-    if ($email == "") { $email = phprs_json_get_string($existing, "email"); }
-    if ($title == "") { $title = phprs_json_get_string($existing, "title"); }
-
-    let $updated_row = json_encode([
-        "id"=>$id,
-        "name"=>$name,
-        "email"=>$email,
-        "title"=>$title,
-        "created_at"=>phprs_json_get_string($existing, "created_at"),
-        "updated_at"=>$ts
-    ]);
-
-    let $updated_json = db_replace_record($rows_json, $id, $updated_row);
-    let $written = db_save_all($updated_json);
-    if ($written < 0) {
-        return api_error(500, "Failed to save record");
+    if ($set_parts == "") {
+        return api_error(400, "No fields to update");
     }
 
-    let $data = json_encode(["message"=>"Updated", "record"=>$updated_row]);
+    let $esc_id = phprs_mysql_escape($id);
+    let $result = phprs_mysql_update("items", $set_parts, "id='" . $esc_id . "'");
+
+    let $data = json_encode(["message"=>"Updated", "result"=>$result]);
     return api_response(200, "OK", $data);
 }
 
-// POST /api/db/delete?id=rec_xxx — delete a record by ID
+// POST /api/db/delete?id=xxx — delete a record by ID
 function db_delete(string $params): string {
     let $id = route_param($params, "id");
     if ($id == "") {
         return api_error(400, "Missing id parameter");
     }
-    let $rows_json = db_load_all();
-    let $existing = db_find_by_id($rows_json, $id);
-    if ($existing == "") {
-        return api_error(404, "Record not found: " . $id);
-    }
-    let $updated = db_remove_record($rows_json, $id);
-    let $written = db_save_all($updated);
-    if ($written < 0) {
-        return api_error(500, "Failed to save record");
-    }
+    let $esc_id = phprs_mysql_escape($id);
+    let $result = phprs_mysql_delete("items", "id='" . $esc_id . "'");
 
-    let $data = json_encode(["message"=>"Deleted", "id"=>$id]);
+    let $data = json_encode(["message"=>"Deleted", "id"=>$id, "result"=>$result]);
     return api_response(200, "OK", $data);
 }
 
-// ---- Internal Helpers (array-as-JSON-string operations) ----
-
-// Count records in JSON array string. Edge cases: "[]" → 0, "" → 0.
-function db_record_count(string $json_arr): int {
-    if ($json_arr == "" || $json_arr == "[]") {
-        return 0;
+// GET /api/db/query?sql=SELECT... — raw SQL query (for admin use only)
+function db_raw_query(string $params): string {
+    let $sql = route_param($params, "sql");
+    if ($sql == "") {
+        return api_error(400, "Missing sql parameter");
     }
-    // Count commas between objects: each "},{" separates records
-    let $count = 0;
-    let $len = strlen($json_arr);
-    let mut $depth = 0;
-    for (let mut $i = 0; $i < $len; $i = $i + 1) {
-        let $c = substr($json_arr, $i, 1);
-        if ($c == "{") { $depth = $depth + 1; }
-        if ($c == "}") { $depth = $depth - 1; }
-        if ($c == "}" && $depth == 0) { $count = $count + 1; }
-    }
-    return $count;
-}
-
-// Find record by ID in JSON array string. Returns empty string if not found.
-function db_find_by_id(string $json_arr, string $id): string {
-    let $len = strlen($json_arr);
-    // Build search key: "id":"<id>"
-    let $key = "\"id\":\"" . $id . "\"";
-    let $pos = strpos($json_arr, $key);
-    if ($pos < 0) {
-        return "";
-    }
-    // Find the enclosing object {{ ... }}
-    let $start = $pos;
-    let mut $depth = 0;
-    // Walk backwards to find opening '{'
-    for (let mut $i = $pos; $i >= 0; $i = $i - 1) {
-        let $c = substr($json_arr, $i, 1);
-        if ($c == "}") { $depth = $depth + 1; }
-        if ($c == "{") {
-            if ($depth == 0) { $start = $i; break; }
-            $depth = $depth - 1;
-        }
-    }
-    // Walk forwards to find closing '}'
-    let $end = $pos;
-    $depth = 0;
-    for (let mut $i = $start; $i < $len; $i = $i + 1) {
-        let $c = substr($json_arr, $i, 1);
-        if ($c == "{") { $depth = $depth + 1; }
-        if ($c == "}") {
-            $depth = $depth - 1;
-            if ($depth == 0) { $end = $i; break; }
-        }
-    }
-    return substr($json_arr, $start, $end - $start + 1);
-}
-
-// Append a record JSON object to the JSON array string.
-function db_append_record(string $json_arr, string $record): string {
-    if ($json_arr == "" || $json_arr == "[]") {
-        return "[" . $record . "]";
-    }
-    let $len = strlen($json_arr);
-    // Strip trailing ']' and append
-    let $prefix = substr($json_arr, 0, $len - 1);
-    return $prefix . "," . $record . "]";
-}
-
-// Replace a record by ID in the JSON array string.
-function db_replace_record(string $json_arr, string $id, string $new_record): string {
-    let $old = db_find_by_id($json_arr, $id);
-    if ($old == "") {
-        return $json_arr;
-    }
-    return phprs_str_replace($json_arr, $old, $new_record);
-}
-
-// Remove a record by ID from the JSON array string.
-function db_remove_record(string $json_arr, string $id): string {
-    let $old = db_find_by_id($json_arr, $id);
-    if ($old == "") {
-        return $json_arr;
-    }
-    // Remove the record and the preceding comma if any
-    let $result = phprs_str_replace($json_arr, $old, "");
-    // Clean up double commas: ",," or "[" trailing comma
-    $result = phprs_str_replace($result, ",,", ",");
-    $result = phprs_str_replace($result, "[,", "[");
-    $result = phprs_str_replace($result, ",]", "]");
-    return $result;
+    let $result = phprs_mysql_query($sql);
+    let $data = json_encode(["query"=>$sql, "result"=>$result]);
+    return api_response(200, "OK", $data);
 }
 ?>"##;
 
 // ---- Redis Controller ----
 const REDIS_CONTROLLER: &str = r##"<?phprs
-// Redis Controller — key-value operations examples.
-// Uses JSON file storage as a simple KV store (simulates Redis).
-// In production, replace with actual Redis driver calls.
+// Redis Controller — key-value operations using real Redis driver.
+// Uses phprs_redis_* functions for direct Redis RESP protocol communication.
 
 include "../config/redis.phprs";
-
-// Internal: KV store file path (simulates a Redis instance).
-function kv_store_path(): string {
-    return "data/kv_store.json";
-}
-
-function kv_load(): string {
-    let $path = kv_store_path();
-    if (file_exists($path) == false) {
-        return "{}";
-    }
-    let $raw = file_get_contents($path);
-    if ($raw == "") { return "{}"; }
-    return $raw;
-}
-
-function kv_save(string $json): int {
-    return file_put_contents(kv_store_path(), $json);
-}
-
-// Get a value from the KV store by key.
-// Returns the raw JSON value, or "" if key not found.
-function kv_get(string $store_json, string $key): string {
-    // Build search: "key":"
-    let $search = "\"" . $key . "\":\"";
-    let $pos = strpos($store_json, $search);
-    if ($pos < 0) {
-        // Try unquoted (number/boolean) value: "key":<val>
-        $search = "\"" . $key . "\":";
-        $pos = strpos($store_json, $search);
-        if ($pos < 0) { return ""; }
-        let $val_start = $pos + strlen($search);
-        // Find comma or '}' as end
-        let $remain = substr($store_json, $val_start, strlen($store_json) - $val_start);
-        let $comma = strpos($remain, ",");
-        let $brace = strpos($remain, "}");
-        let mut $val_end = strlen($remain);
-        if ($comma >= 0 && $comma < $val_end) { $val_end = $comma; }
-        if ($brace >= 0 && $brace < $val_end) { $val_end = $brace; }
-        return substr($remain, 0, $val_end);
-    }
-    let $val_start = $pos + strlen($search);
-    let $remain = substr($store_json, $val_start, strlen($store_json) - $val_start);
-    let $end_quote = strpos($remain, "\"");
-    if ($end_quote < 0) { return ""; }
-    return substr($remain, 0, $end_quote);
-}
-
-// Set a key-value pair in the KV store. Returns updated JSON.
-// kv_set handles both new keys and updates to existing keys.
-function kv_set(string $store_json, string $key, string $val): string {
-    let $entry = "\"" . $key . "\":\"" . $val . "\"";
-    let $existing = kv_get($store_json, $key);
-    if ($existing != "") {
-        // Update existing key
-        let $old_entry = "\"" . $key . "\":\"" . $existing . "\"";
-        return phprs_str_replace($store_json, $old_entry, $entry);
-    }
-    // New key — insert before closing '}'
-    let $len = strlen($store_json);
-    if ($store_json == "{}") {
-        return "{" . $entry . "}";
-    }
-    let $prefix = substr($store_json, 0, $len - 1);
-    return $prefix . "," . $entry . "}";
-}
-
-// Remove a key from the KV store. Returns updated JSON.
-function kv_del(string $store_json, string $key): string {
-    let $existing = kv_get($store_json, $key);
-    if ($existing == "") { return $store_json; }
-    let $old_entry = "\"" . $key . "\":\"" . $existing . "\"";
-    let $result = phprs_str_replace($store_json, $old_entry, "");
-    // Clean up: remove trailing/leading commas from the empty slot
-    $result = phprs_str_replace($result, ",,", ",");
-    $result = phprs_str_replace($result, "{,", "{");
-    $result = phprs_str_replace($result, ",}", "}");
-    return $result;
-}
 
 // ---- Public API Handlers ----
 
 // POST /api/redis/set — set a key-value pair
-// Body (JSON or form): key, value, ttl (optional, ignored for file store)
+// Body (JSON or form): key, value, ttl (optional seconds)
 function redis_set(string $raw): string {
     let $body = phprs_http_body($raw);
     let $content_type = phprs_http_header($raw, "Content-Type");
 
     let mut $key = "";
     let mut $value = "";
+    let mut $ttl = 0;
 
     if (phprs_str_contains($content_type, "json") == 1) {
         $key = phprs_json_get_string($body, "key");
         $value = phprs_json_get_string($body, "value");
+        $ttl = phprs_json_get_int($body, "ttl");
     } else {
         $key = request_param($body, "key");
         $value = request_param($body, "value");
@@ -1036,17 +897,18 @@ function redis_set(string $raw): string {
         return api_error(400, "Missing key");
     }
 
-    let $store = kv_load();
-    let $updated = kv_set($store, $key, $value);
-    kv_save($updated);
+    let mut $result = "";
+    if ($ttl > 0) {
+        $result = phprs_redis_setex($key, $ttl, $value);
+    } else {
+        $result = phprs_redis_set($key, $value);
+    }
 
-    let $config = redis_default();
     let $data = json_encode([
-        "message"=>"OK",
+        "message"=>$result,
         "key"=>$key,
         "value"=>$value,
-        "redis_host"=>phprs_json_get_string($config, "host"),
-        "redis_port"=>phprs_json_get_string($config, "port")
+        "ttl"=>$ttl
     ]);
     return api_response(200, "OK", $data);
 }
@@ -1057,12 +919,12 @@ function redis_get(string $params): string {
     if ($key == "") {
         return api_error(400, "Missing key parameter");
     }
-    let $store = kv_load();
-    let $value = kv_get($store, $key);
-    if ($value == "") {
+    let $value = phprs_redis_get($key);
+    if ($value == "(nil)") {
         return api_error(404, "Key not found: " . $key);
     }
-    let $data = json_encode(["key"=>$key, "value"=>$value]);
+    let $ttl = phprs_redis_ttl($key);
+    let $data = json_encode(["key"=>$key, "value"=>$value, "ttl"=>$ttl]);
     return api_response(200, "OK", $data);
 }
 
@@ -1072,43 +934,97 @@ function redis_del(string $params): string {
     if ($key == "") {
         return api_error(400, "Missing key parameter");
     }
-    let $store = kv_load();
-    let $before = kv_get($store, $key);
-    if ($before == "") {
+    let $exists = phprs_redis_exists($key);
+    if ($exists == 0) {
         return api_error(404, "Key not found: " . $key);
     }
-    let $updated = kv_del($store, $key);
-    kv_save($updated);
-    let $data = json_encode(["message"=>"Deleted", "key"=>$key]);
+    let $result = phprs_redis_del($key);
+    let $data = json_encode(["message"=>"Deleted", "key"=>$key, "deleted"=>$result]);
     return api_response(200, "OK", $data);
 }
 
-// GET /api/redis/keys — list all keys in the store
+// GET /api/redis/keys — list all keys matching pattern
 function redis_keys(): string {
-    let $store = kv_load();
-    let $config = redis_cache();
+    let $keys_json = phprs_redis_keys("*");
+    let $ping = phprs_redis_ping();
     let $data = json_encode([
-        "redis_cache_db"=>phprs_json_get_string($config, "database"),
-        "key_count"=>kv_key_count($store),
-        "store"=>$store
+        "ping"=>$ping,
+        "keys"=>$keys_json
     ]);
     return api_response(200, "OK", $data);
 }
 
-// Count keys in the JSON object string.
-function kv_key_count(string $json_obj): int {
-    if ($json_obj == "" || $json_obj == "{}") {
-        return 0;
+// POST /api/redis/incr?key=xxx — increment a numeric key
+function redis_incr(string $params): string {
+    let $key = route_param($params, "key");
+    if ($key == "") {
+        return api_error(400, "Missing key parameter");
     }
-    let $count = 0;
-    let $len = strlen($json_obj);
-    let mut $in_string = 0;
-    for (let mut $i = 1; $i < $len - 1; $i = $i + 1) {
-        let $c = substr($json_obj, $i, 1);
-        if ($c == "\"") { $in_string = 1 - $in_string; }
-        if ($c == ":" && $in_string == 0) { $count = $count + 1; }
+    let $val = phprs_redis_incr($key);
+    let $data = json_encode(["key"=>$key, "value"=>$val]);
+    return api_response(200, "OK", $data);
+}
+
+// POST /api/redis/hset — set a hash field
+// Body (JSON): key, field, value
+function redis_hset(string $raw): string {
+    let $body = phprs_http_body($raw);
+    let $key = phprs_json_get_string($body, "key");
+    let $field = phprs_json_get_string($body, "field");
+    let $value = phprs_json_get_string($body, "value");
+    if ($key == "" || $field == "") {
+        return api_error(400, "Missing key or field");
     }
-    return $count;
+    let $result = phprs_redis_hset($key, $field, $value);
+    let $data = json_encode(["key"=>$key, "field"=>$field, "value"=>$value, "result"=>$result]);
+    return api_response(200, "OK", $data);
+}
+
+// GET /api/redis/hgetall?key=xxx — get all hash fields
+function redis_hgetall(string $params): string {
+    let $key = route_param($params, "key");
+    if ($key == "") {
+        return api_error(400, "Missing key parameter");
+    }
+    let $result = phprs_redis_hgetall($key);
+    let $data = json_encode(["key"=>$key, "fields"=>$result]);
+    return api_response(200, "OK", $data);
+}
+
+// POST /api/redis/lpush — push to list
+// Body (JSON): key, value
+function redis_lpush(string $raw): string {
+    let $body = phprs_http_body($raw);
+    let $key = phprs_json_get_string($body, "key");
+    let $value = phprs_json_get_string($body, "value");
+    if ($key == "") {
+        return api_error(400, "Missing key");
+    }
+    let $result = phprs_redis_lpush($key, $value);
+    let $data = json_encode(["key"=>$key, "value"=>$value, "length"=>$result]);
+    return api_response(200, "OK", $data);
+}
+
+// GET /api/redis/lrange?key=xxx&start=0&stop=-1 — get list range
+function redis_lrange(string $params): string {
+    let $key = route_param($params, "key");
+    if ($key == "") {
+        return api_error(400, "Missing key parameter");
+    }
+    let $items = phprs_redis_lrange($key, 0, -1);
+    let $data = json_encode(["key"=>$key, "items"=>$items]);
+    return api_response(200, "OK", $data);
+}
+
+// GET /api/redis/cmd?cmd=SET+mykey+myvalue — raw command (space-separated)
+function redis_cmd(string $params): string {
+    let $cmd = route_param($params, "cmd");
+    if ($cmd == "") {
+        return api_error(400, "Missing cmd parameter");
+    }
+    let $result = phprs_redis_cmd($cmd);
+    let $data = json_encode(["command"=>$cmd, "result"=>$result]);
+    return api_response(200, "OK", $data);
 }
 ?>"##;
 
@@ -1183,6 +1099,9 @@ websocat ws://localhost:8080/ws/echo</pre>
 // path: the requested WebSocket path (e.g., "/ws/chat")
 // Returns 1 if this was a WebSocket connection (handled), 0 otherwise.
 function ws_handle_chat(int $client_fd, string $path): int {
+    // Register this connection in the manager
+    let $slot = phprs_ws_register($client_fd, "chat");
+
     // Broadcast loop — read frames until disconnect
     for (let mut $running = 1; $running == 1; ) {
         let $frame = ws_read($client_fd);
@@ -1198,21 +1117,32 @@ function ws_handle_chat(int $client_fd, string $path): int {
             break;
         }
 
-        // Handle text message — echo back to sender (real broadcast would
-        // require tracking all connected client FDs)
+        // Handle pong — update heartbeat timestamp
+        if ($opcode == 10) {
+            phprs_ws_update_pong($client_fd);
+        }
+
+        // Handle text message — broadcast to all in "chat" room
         if ($opcode == 1) {
             let $payload = ws_frame_payload($frame);
             let $msg = "[chat] " . $path . " says: " . $payload;
+            phprs_ws_broadcast("chat", $msg, $client_fd);
+            // Also echo back to sender
             ws_send_text($client_fd, $msg);
         }
     }
 
+    // Unregister on disconnect
+    phprs_ws_unregister($client_fd);
     return 1;
 }
 
 // Handle a WebSocket echo connection.
 // Simply echoes back every text frame received.
 function ws_handle_echo(int $client_fd, string $path): int {
+    // Register this connection in the manager
+    let $slot = phprs_ws_register($client_fd, "echo");
+
     for (let mut $running = 1; $running == 1; ) {
         let $frame = ws_read($client_fd);
         if ($frame == "" || phprs_str_starts_with($frame, "-1:") == 1) {
@@ -1226,6 +1156,11 @@ function ws_handle_echo(int $client_fd, string $path): int {
             break;
         }
 
+        // Handle pong — update heartbeat timestamp
+        if ($opcode == 10) {
+            phprs_ws_update_pong($client_fd);
+        }
+
         if ($opcode == 1) {
             let $payload = ws_frame_payload($frame);
             let $reply = "[echo] " . $payload;
@@ -1233,6 +1168,8 @@ function ws_handle_echo(int $client_fd, string $path): int {
         }
     }
 
+    // Unregister on disconnect
+    phprs_ws_unregister($client_fd);
     return 1;
 }
 ?>"##;

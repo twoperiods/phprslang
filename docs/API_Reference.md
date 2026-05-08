@@ -1,6 +1,8 @@
 # PHPRS API Reference
 
-PHPRS 所有内置函数与运行时系统函数的完整参考。
+> PHPRS 所有内置函数与运行时系统函数的完整参考 — 含示例代码  
+> Complete API reference for the PHPRS language runtime with examples  
+> Version: 2.0 | Updated: 2025-07-08
 
 ## 目录
 
@@ -26,6 +28,17 @@ PHPRS 所有内置函数与运行时系统函数的完整参考。
 20. [WebSocket](#websocket)
 21. [多线程](#多线程)
 22. [curl HTTP 客户端](#curl--新一代-http-客户端)
+23. [服务器配置与生产特性](#服务器配置与生产特性)
+24. [日志与可观测性](#日志与可观测性)
+25. [限流器](#限流器)
+26. [CORS 跨域资源共享](#cors-跨域资源共享)
+27. [线程池](#线程池)
+28. [应用状态（线程安全全局变量）](#应用状态线程安全全局变量)
+29. [请求解析](#请求解析)
+30. [Redis 客户端（连接池）](#redis-客户端连接池)
+31. [MySQL 客户端（连接池）](#mysql-客户端连接池)
+32. [WebSocket 连接管理器](#websocket-连接管理器)
+33. [生产特性总览](#生产特性总览)
 
 ---
 
@@ -2810,3 +2823,879 @@ phprs_mutex_unlock($mutex);
 | `checkdate` | `(int, int, int): bool` | 验证日期合法性 |
 | `mktime` | `(int, int, int, int, int, int): int` | 构造时间戳 |
 | `phprs_client_ip` | `(int): string` | 获取客户端 IP |
+| `phprs_config` | `(string): void` | 服务器 JSON 配置 |
+| `phprs_config_max_body` | `(int): void` | 设置最大请求体大小 |
+| `phprs_config_timeout` | `(int, int): void` | 设置读写超时 |
+| `phprs_config_max_connections` | `(int): void` | 设置最大连接数 |
+| `phprs_is_shutting_down` | `(): int` | 检查是否正在关闭 |
+| `phprs_write_pidfile` | `(string): void` | 写入 PID 文件 |
+| `phprs_log` | `(string): void` | 写入访问日志 |
+| `phprs_log_error_msg` | `(string): void` | 写入错误日志 |
+| `phprs_log_init` | `(string): void` | 设置日志文件路径 |
+| `phprs_rate_limit_init` | `(int, int): void` | 初始化限流器 |
+| `phprs_rate_limit_check` | `(string): int` | 检查 IP 限流 |
+| `phprs_cors_set_config` | `(string, string, string): void` | 配置 CORS |
+| `phprs_cors_get_origin` | `(): string` | 获取 CORS Origin |
+| `phprs_cors_get_methods` | `(): string` | 获取 CORS Methods |
+| `phprs_cors_get_headers` | `(): string` | 获取 CORS Headers |
+| `phprs_cors_is_preflight` | `(string): int` | 检测 CORS 预检请求 |
+| `phprs_thread_pool_init` | `(int): void` | 初始化线程池 |
+| `phprs_thread_pool_enqueue` | `(int, string, string): void` | 入队请求 |
+| `phprs_thread_pool_shutdown` | `(): void` | 关闭线程池 |
+| `phprs_app_set_routes` | `(string): void` | 存储路由配置 |
+| `phprs_app_get_routes` | `(): string` | 获取路由配置 |
+| `phprs_app_set_port` | `(int): void` | 存储服务器端口 |
+| `phprs_app_get_port` | `(): int` | 获取服务器端口 |
+| `phprs_request_parse` | `(string): string` | 解析原始请求为 JSON |
+| `phprs_redis_init` | `(string, int, string): void` | 初始化 Redis 连接池 |
+| `phprs_redis_close` | `(): void` | 关闭所有 Redis 连接 |
+| `phprs_redis_get` | `(string): string` | Redis GET |
+| `phprs_redis_set` | `(string, string): string` | Redis SET |
+| `phprs_redis_setex` | `(string, int, string): string` | Redis SETEX |
+| `phprs_redis_del` | `(string): string` | Redis DEL |
+| `phprs_redis_exists` | `(string): int` | Redis EXISTS |
+| `phprs_redis_expire` | `(string, int): int` | Redis EXPIRE |
+| `phprs_redis_ttl` | `(string): int` | Redis TTL |
+| `phprs_redis_incr` | `(string): int` | Redis INCR |
+| `phprs_redis_decr` | `(string): int` | Redis DECR |
+| `phprs_redis_hset` | `(string, string, string): string` | Redis HSET |
+| `phprs_redis_hget` | `(string, string): string` | Redis HGET |
+| `phprs_redis_hgetall` | `(string): string` | Redis HGETALL |
+| `phprs_redis_lpush` | `(string, string): string` | Redis LPUSH |
+| `phprs_redis_rpush` | `(string, string): string` | Redis RPUSH |
+| `phprs_redis_lrange` | `(string, int, int): string` | Redis LRANGE |
+| `phprs_redis_keys` | `(string): string` | Redis KEYS |
+| `phprs_redis_ping` | `(): string` | Redis PING |
+| `phprs_redis_select` | `(int): string` | Redis SELECT |
+| `phprs_redis_cmd` | `(string): string` | Redis 原始命令 |
+| `phprs_mysql_init` | `(string, int, string, string, string): void` | 初始化 MySQL 连接池 |
+| `phprs_mysql_close` | `(): void` | 关闭所有 MySQL 连接 |
+| `phprs_mysql_query` | `(string): string` | 执行 SQL 查询 |
+| `phprs_mysql_exec` | `(string): string` | 执行非查询 SQL |
+| `phprs_mysql_select` | `(string, string): string` | 便捷 SELECT |
+| `phprs_mysql_insert` | `(string, string): string` | 便捷 INSERT |
+| `phprs_mysql_update` | `(string, string, string): string` | 便捷 UPDATE |
+| `phprs_mysql_delete` | `(string, string): string` | 便捷 DELETE |
+| `phprs_mysql_escape` | `(string): string` | SQL 转义 |
+| `phprs_ws_manager_init` | `(int): void` | 初始化 WS 连接管理器 |
+| `phprs_ws_register` | `(int, string): int` | 注册 WS 连接 |
+| `phprs_ws_unregister` | `(int): void` | 注销 WS 连接 |
+| `phprs_ws_update_pong` | `(int): void` | 更新 Pong 时间戳 |
+| `phprs_ws_broadcast` | `(string, string, int): int` | 房间广播 |
+| `phprs_ws_broadcast_all` | `(string, int): int` | 全局广播 |
+| `phprs_ws_count` | `(string): int` | WS 连接数 |
+| `phprs_ws_rooms` | `(): string` | 获取房间列表 |
+| `phprs_ws_start_heartbeat` | `(int): void` | 启动心跳线程 |
+
+---
+
+## 服务器配置与生产特性
+
+### `phprs_config(string $json): void`
+
+通过 JSON 字符串一次性配置服务器参数。
+
+| 键 | 类型 | 默认值 | 说明 |
+|-----|------|---------|-------------|
+| `threads` | int | 8 | 线程池工作线程数 |
+| `max_body` | string | `"10m"` | 最大请求体大小 |
+| `read_timeout` | int | 30 | 读超时（秒） |
+| `write_timeout` | int | 60 | 写超时（秒） |
+| `max_connections` | int | 10000 | 最大并发连接数 |
+| `log` | string | `"-"` | 访问日志路径（`"-"` 为 stdout） |
+| `error_log` | string | `"-"` | 错误日志路径（`"-"` 为 stderr） |
+| `pidfile` | string | — | PID 文件路径 |
+
+```php
+phprs_config("{\"threads\":8,\"max_body\":\"10m\",\"read_timeout\":30,\"log\":\"-\"}");
+```
+
+### `phprs_config_max_body(int $bytes): void`
+
+设置请求体大小上限（字节）。超过限制的请求返回 413。
+
+```php
+phprs_config_max_body(20 * 1024 * 1024);  // 20 MB
+```
+
+### `phprs_config_timeout(int $read_sec, int $write_sec): void`
+
+设置 socket 读写超时。
+
+```php
+phprs_config_timeout(30, 60);
+```
+
+### `phprs_config_max_connections(int $max): void`
+
+设置最大并发连接数。超出限制的连接被拒绝。
+
+```php
+phprs_config_max_connections(5000);
+```
+
+### `phprs_is_shutting_down(): int`
+
+检查服务器是否正在优雅关闭（收到 SIGTERM/SIGINT）。返回 1 表示正在关闭。
+
+```php
+while (phprs_is_shutting_down() == 0) {
+    let $client = phprs_server_accept($server);
+    // 处理请求...
+}
+echo "Server shutting down gracefully...";
+```
+
+### `phprs_write_pidfile(string $path): void`
+
+将当前进程 PID 写入文件，便于进程管理。
+
+```php
+phprs_write_pidfile("/var/run/myapp.pid");
+```
+
+### 信号处理
+
+运行时自动安装以下信号处理：
+
+| 信号 | 行为 |
+|--------|----------|
+| `SIGTERM` | 优雅关闭（设置 `phprs_is_shutting_down()` 标志） |
+| `SIGINT` | 优雅关闭（Ctrl+C） |
+| `SIGHUP` | 重新打开日志文件（日志轮转） |
+| `SIGPIPE` | 忽略（防止写入断开连接时崩溃） |
+
+### 安全响应头
+
+运行时自动注入以下安全响应头：
+
+- `X-Content-Type-Options: nosniff`
+- `X-Frame-Options: SAMEORIGIN`
+- `X-XSS-Protection: 1; mode=block`
+- `Referrer-Policy: strict-origin-when-cross-origin`
+- `X-Request-Id: {自增ID}`（请求追踪）
+
+---
+
+## 日志与可观测性
+
+### `phprs_log(string $msg): void`
+
+写入访问日志（带时间戳）。
+
+```php
+phprs_log("Application started");
+phprs_log("Processing request for user: " . $user_id);
+```
+
+### `phprs_log_error_msg(string $msg): void`
+
+写入错误日志（带时间戳）。
+
+```php
+phprs_log_error_msg("Database connection failed");
+phprs_log_error_msg("Invalid input: " . $raw_input);
+```
+
+### `phprs_log_init(string $path): void`
+
+设置访问日志文件路径。`"-"` 表示标准输出。
+
+```php
+phprs_log_init("/var/log/myapp/access.log");
+```
+
+### 内置端点
+
+运行时自动处理以下端点（在用户请求处理器之前）：
+
+#### `GET /health` — 健康检查
+
+返回 JSON：
+```json
+{"status":"ok","uptime":3600,"active_connections":42,"total_requests":12345,"queue_depth":2}
+```
+
+#### `GET /metrics` — Prometheus 指标
+
+返回 Prometheus 格式文本：
+```
+# HELP phprs_requests_total Total HTTP requests processed
+phprs_requests_total 12345
+# HELP phprs_active_connections Current active connections
+phprs_active_connections 42
+# HELP phprs_uptime_seconds Server uptime in seconds
+phprs_uptime_seconds 3600
+```
+
+### 访问日志格式
+
+每个请求自动记录：
+```
+[2025-07-08T14:30:00] 127.0.0.1 "GET /api/users" 200 1234 0.5ms req_id=42
+```
+
+### 日志轮转
+
+发送 `SIGHUP` 信号重新打开日志文件（配合 logrotate 使用）：
+```bash
+kill -HUP $(cat /var/run/myapp.pid)
+```
+
+---
+
+## 限流器
+
+### `phprs_rate_limit_init(int $max_requests, int $window_sec): void`
+
+初始化 IP 限流器。使用 4096 个哈希桶的滑动窗口算法。
+
+```php
+phprs_rate_limit_init(100, 60);  // 每分钟最多 100 次请求
+```
+
+### `phprs_rate_limit_check(string $ip): int`
+
+检查 IP 是否在限流范围内。返回 1 表示允许，0 表示被限制。
+
+```php
+let $ip = phprs_client_ip($client);
+if (phprs_rate_limit_check($ip) == 0) {
+    let $resp = phprs_http_response(429, "text/plain", "Too Many Requests");
+    phprs_socket_write($client, $resp);
+    phprs_socket_close($client);
+    return;
+}
+```
+
+---
+
+## CORS 跨域资源共享
+
+### `phprs_cors_set_config(string $origin, string $methods, string $headers): void`
+
+配置 CORS 策略。
+
+```php
+phprs_cors_set_config(
+    "https://myapp.com",
+    "GET,POST,PUT,DELETE,OPTIONS",
+    "Content-Type,Authorization,X-Custom-Header"
+);
+```
+
+### `phprs_cors_get_origin(): string`
+
+获取配置的 CORS Origin。默认：`"*"`。
+
+### `phprs_cors_get_methods(): string`
+
+获取配置的 CORS Methods。默认：`"GET,POST,PUT,DELETE,PATCH,OPTIONS"`。
+
+### `phprs_cors_get_headers(): string`
+
+获取配置的 CORS Headers。默认：`"Content-Type,Authorization"`。
+
+### `phprs_cors_is_preflight(string $raw): int`
+
+检测是否为 CORS 预检请求（OPTIONS）。返回 1 表示是。
+
+```php
+if (phprs_cors_is_preflight($raw) == 1) {
+    let $resp = phprs_http_response(204, "", "");
+    // 添加 CORS 头并响应...
+    phprs_socket_write($client, $resp);
+    phprs_socket_close($client);
+    return;
+}
+```
+
+---
+
+## 线程池
+
+### `phprs_thread_pool_init(int $num_workers): void`
+
+初始化工作线程池。每个线程有独立的 256KB 内存竞技场。
+
+```php
+phprs_thread_pool_init(8);  // 8 个工作线程
+```
+
+### `phprs_thread_pool_enqueue(int $fd, string $raw_request, string $client_ip): void`
+
+将请求入队，由线程池中的工作线程处理。自动完成：
+- 请求计时（`clock_gettime`）
+- 内存竞技场重置
+- 安全头注入
+- 请求 ID 生成
+- 访问日志记录
+
+```php
+phprs_register_handler();  // 注册请求处理函数
+phprs_thread_pool_init(8);
+
+while (phprs_is_shutting_down() == 0) {
+    let $client = phprs_server_accept($server);
+    if ($client >= 0) {
+        let $raw = phprs_socket_read($client, 65536);
+        let $ip = phprs_client_ip($client);
+        phprs_thread_pool_enqueue($client, $raw, $ip);
+    }
+}
+```
+
+### `phprs_thread_pool_shutdown(): void`
+
+优雅关闭线程池，等待所有队列请求处理完成。
+
+```php
+phprs_thread_pool_shutdown();
+```
+
+---
+
+## 应用状态（线程安全全局变量）
+
+### `phprs_app_set_routes(string $routes): void`
+
+存储路由配置（线程安全，互斥锁保护）。
+
+```php
+phprs_app_set_routes("GET /=home,GET /api/users=api_users,POST /api/users=api_create_user");
+```
+
+### `phprs_app_get_routes(): string`
+
+获取已存储的路由配置。
+
+### `phprs_app_set_port(int $port): void`
+
+存储服务器端口号。
+
+### `phprs_app_get_port(): int`
+
+获取已存储的端口号。
+
+---
+
+## 请求解析
+
+### `phprs_request_parse(string $raw): string`
+
+将原始 HTTP 请求解析为 JSON 对象。
+
+```php
+let $req = phprs_request_parse($raw);
+// 返回: {"method":"POST","path":"/api/users","query":"page=1","content_type":"application/json","body":"{...}","cookie":"sid=abc123"}
+
+let $method = phprs_json_get_string($req, "method");
+let $path = phprs_json_get_string($req, "path");
+let $body = phprs_json_get_string($req, "body");
+```
+
+---
+
+## Redis 客户端（连接池）
+
+使用 RESP 协议的 Redis 客户端。连接池大小：8，带缓冲读取器（8KB）和 PING 健康检查。
+
+### `phprs_redis_init(string $host, int $port, string $password): void`
+
+初始化 Redis 连接池。
+
+```php
+phprs_redis_init("127.0.0.1", 6379, "my_password");
+```
+
+### `phprs_redis_close(): void`
+
+关闭所有连接池中的连接。
+
+```php
+phprs_redis_close();
+```
+
+### 字符串命令
+
+#### `phprs_redis_get(string $key): string`
+
+获取键值。未找到返回 `"(nil)"`。
+
+```php
+let $value = phprs_redis_get("user:1:name");
+if ($value != "(nil)") {
+    echo "Name: " . $value;
+}
+```
+
+#### `phprs_redis_set(string $key, string $value): string`
+
+设置键值对。
+
+```php
+phprs_redis_set("user:1:name", "Alice");
+```
+
+#### `phprs_redis_setex(string $key, int $seconds, string $value): string`
+
+设置带过期时间的键值对。
+
+```php
+phprs_redis_setex("session:abc123", 3600, $session_data);  // 1 小时过期
+```
+
+#### `phprs_redis_del(string $key): string`
+
+删除键。
+
+```php
+phprs_redis_del("user:1:name");
+```
+
+#### `phprs_redis_exists(string $key): int`
+
+检查键是否存在。返回 1 存在，0 不存在。
+
+```php
+if (phprs_redis_exists("session:abc123") == 1) {
+    echo "Session is active";
+}
+```
+
+#### `phprs_redis_expire(string $key, int $seconds): int`
+
+设置键的 TTL。
+
+```php
+phprs_redis_expire("cache:page:home", 300);  // 5 分钟
+```
+
+#### `phprs_redis_ttl(string $key): int`
+
+获取剩余 TTL（秒）。-1 表示永不过期，-2 表示不存在。
+
+```php
+let $ttl = phprs_redis_ttl("session:abc123");
+echo "Expires in: " . $ttl . " seconds";
+```
+
+#### `phprs_redis_incr(string $key): int`
+
+原子递增。
+
+```php
+let $views = phprs_redis_incr("page:views:home");
+echo "Total views: " . $views;
+```
+
+#### `phprs_redis_decr(string $key): int`
+
+原子递减。
+
+```php
+let $stock = phprs_redis_decr("product:1:stock");
+```
+
+### 哈希命令
+
+#### `phprs_redis_hset(string $key, string $field, string $value): string`
+
+设置哈希字段。
+
+```php
+phprs_redis_hset("user:1", "name", "Alice");
+phprs_redis_hset("user:1", "email", "alice@example.com");
+phprs_redis_hset("user:1", "age", "30");
+```
+
+#### `phprs_redis_hget(string $key, string $field): string`
+
+获取哈希字段值。
+
+```php
+let $name = phprs_redis_hget("user:1", "name");  // "Alice"
+```
+
+#### `phprs_redis_hgetall(string $key): string`
+
+获取哈希所有字段和值。返回 JSON 数组 `["field1","val1","field2","val2",...]`。
+
+```php
+let $user = phprs_redis_hgetall("user:1");
+// ["name","Alice","email","alice@example.com","age","30"]
+```
+
+### 列表命令
+
+#### `phprs_redis_lpush(string $key, string $value): string`
+
+从左端插入列表。
+
+```php
+phprs_redis_lpush("queue:tasks", "send_email");
+phprs_redis_lpush("queue:tasks", "process_image");
+```
+
+#### `phprs_redis_rpush(string $key, string $value): string`
+
+从右端插入列表。
+
+```php
+phprs_redis_rpush("log:events", "user_login");
+```
+
+#### `phprs_redis_lrange(string $key, int $start, int $stop): string`
+
+获取列表指定范围的元素。返回 JSON 数组。
+
+```php
+let $tasks = phprs_redis_lrange("queue:tasks", 0, -1);
+// ["process_image","send_email"]
+```
+
+### 工具命令
+
+#### `phprs_redis_keys(string $pattern): string`
+
+查找匹配模式的键。返回 JSON 数组。
+
+```php
+let $user_keys = phprs_redis_keys("user:*");
+// ["user:1","user:2","user:3"]
+```
+
+#### `phprs_redis_ping(): string`
+
+Ping 服务器。连接正常返回 `"PONG"`。
+
+```php
+let $pong = phprs_redis_ping();
+echo $pong;  // "PONG"
+```
+
+#### `phprs_redis_select(int $db): string`
+
+切换数据库（0-15）。
+
+```php
+phprs_redis_select(1);  // 切换到数据库 1
+```
+
+#### `phprs_redis_cmd(string $command): string`
+
+执行原始 Redis 命令（空格分隔）。
+
+```php
+let $result = phprs_redis_cmd("SET mykey myvalue EX 3600");
+let $info = phprs_redis_cmd("INFO server");
+```
+
+### Redis 完整示例
+
+```php
+<?phprs
+// 初始化
+phprs_redis_init("127.0.0.1", 6379, "redis_123");
+
+// 字符串操作
+phprs_redis_set("counter", "0");
+let $val = phprs_redis_incr("counter");  // 1
+let $val = phprs_redis_incr("counter");  // 2
+
+// 带过期时间的缓存
+phprs_redis_setex("cache:user:1", 300, "{\"name\":\"Alice\",\"age\":30}");
+
+// 哈希操作
+phprs_redis_hset("config", "app_name", "MyApp");
+phprs_redis_hset("config", "version", "1.0");
+let $name = phprs_redis_hget("config", "app_name");
+
+// 列表作为队列
+phprs_redis_rpush("queue:emails", "user1@example.com");
+phprs_redis_rpush("queue:emails", "user2@example.com");
+let $pending = phprs_redis_lrange("queue:emails", 0, -1);
+
+// 关闭
+phprs_redis_close();
+?>
+```
+
+---
+
+## MySQL 客户端（连接池）
+
+通过 `libmysqlclient` 实现的 MySQL 客户端。连接池大小：8，带 `mysql_ping()` 健康检查。
+
+> **注意**：编译时需要 `-DPHPRS_HAS_MYSQL -lmysqlclient`。PHPRS 编译器会自动检测已安装的 MySQL。
+
+### `phprs_mysql_init(string $host, int $port, string $user, string $pass, string $dbname): void`
+
+初始化 MySQL 连接池。
+
+```php
+phprs_mysql_init("127.0.0.1", 3306, "root", "password", "myapp");
+```
+
+### `phprs_mysql_close(): void`
+
+关闭所有连接池中的连接。
+
+```php
+phprs_mysql_close();
+```
+
+### `phprs_mysql_query(string $sql): string`
+
+执行 SQL 查询。SELECT 返回 JSON 对象数组，INSERT/UPDATE/DELETE 返回 `{"affected_rows":N,"insert_id":M}`。
+
+```php
+// SELECT
+let $users = phprs_mysql_query("SELECT id, name, email FROM users WHERE active = 1");
+// [{"id":1,"name":"Alice","email":"alice@example.com"},{"id":2,"name":"Bob","email":"bob@example.com"}]
+
+// INSERT
+let $result = phprs_mysql_query("INSERT INTO users (name, email) VALUES ('Carol', 'carol@example.com')");
+// {"affected_rows":1,"insert_id":3}
+
+// UPDATE
+let $result = phprs_mysql_query("UPDATE users SET active = 0 WHERE id = 5");
+// {"affected_rows":1,"insert_id":0}
+
+// DELETE
+let $result = phprs_mysql_query("DELETE FROM sessions WHERE expires_at < NOW()");
+// {"affected_rows":15,"insert_id":0}
+```
+
+### `phprs_mysql_exec(string $sql): string`
+
+`phprs_mysql_query()` 的别名 — 用于非查询语句提高可读性。
+
+```php
+phprs_mysql_exec("CREATE TABLE IF NOT EXISTS users (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(255))");
+```
+
+### `phprs_mysql_select(string $table, string $where): string`
+
+便捷方法：`SELECT * FROM table WHERE ...`。返回 JSON 数组。
+
+```php
+let $users = phprs_mysql_select("users", "active = 1 ORDER BY name");
+let $all = phprs_mysql_select("products", "");  // 无 WHERE 条件
+```
+
+### `phprs_mysql_insert(string $table, string $json_data): string`
+
+便捷方法：从 JSON 对象插入行。
+
+```php
+let $result = phprs_mysql_insert("users", "{\"name\":\"Dave\",\"email\":\"dave@example.com\",\"age\":25}");
+// {"affected_rows":1,"insert_id":4}
+```
+
+### `phprs_mysql_update(string $table, string $set, string $where): string`
+
+便捷方法：`UPDATE table SET ... WHERE ...`。
+
+```php
+let $result = phprs_mysql_update("users", "name='David'", "id = 4");
+```
+
+### `phprs_mysql_delete(string $table, string $where): string`
+
+便捷方法：`DELETE FROM table WHERE ...`。
+
+```php
+let $result = phprs_mysql_delete("sessions", "expires_at < NOW()");
+```
+
+### `phprs_mysql_escape(string $s): string`
+
+转义字符串用于安全 SQL（防止 SQL 注入）。
+
+```php
+let $safe_name = phprs_mysql_escape($user_input);
+let $sql = "SELECT * FROM users WHERE name = '" . $safe_name . "'";
+let $result = phprs_mysql_query($sql);
+```
+
+### MySQL 完整示例
+
+```php
+<?phprs
+// 初始化
+phprs_mysql_init("127.0.0.1", 3306, "root", "password", "myapp");
+
+// 创建表
+phprs_mysql_exec("CREATE TABLE IF NOT EXISTS users (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    email VARCHAR(255) NOT NULL,
+    age INT DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)");
+
+// 插入
+let $r = phprs_mysql_insert("users", "{\"name\":\"Alice\",\"email\":\"alice@example.com\",\"age\":30}");
+let $user_id = phprs_json_get_int($r, "insert_id");
+
+// 查询
+let $users = phprs_mysql_query("SELECT * FROM users ORDER BY id DESC LIMIT 10");
+
+// 更新
+phprs_mysql_update("users", "age = 31", "id = " . $user_id);
+
+// 安全查询
+let $name = phprs_mysql_escape($input);
+let $results = phprs_mysql_query("SELECT * FROM users WHERE name = '" . $name . "'");
+
+// 关闭
+phprs_mysql_close();
+?>
+```
+
+---
+
+## WebSocket 连接管理器
+
+在基本 WebSocket API 之上提供连接管理、房间系统和自动心跳功能。最大支持 1024 个并发连接。
+
+### `phprs_ws_manager_init(int $heartbeat_sec): void`
+
+初始化 WebSocket 连接管理器。
+
+```php
+phprs_ws_manager_init(30);  // 30 秒心跳间隔
+```
+
+### `phprs_ws_register(int $fd, string $room): int`
+
+将 WebSocket 连接注册到管理器中，分配到指定房间。返回槽位索引，-1 表示已满。
+
+```php
+let $slot = phprs_ws_register($client, "chat:general");
+```
+
+### `phprs_ws_unregister(int $fd): void`
+
+从管理器中移除连接。
+
+```php
+phprs_ws_unregister($client);
+```
+
+### `phprs_ws_update_pong(int $fd): void`
+
+更新连接的最后 Pong 时间戳（收到 Pong 帧时调用）。
+
+```php
+phprs_ws_update_pong($client);
+```
+
+### `phprs_ws_broadcast(string $room, string $message, int $exclude_fd): int`
+
+向指定房间内的所有客户端广播消息，可排除一个连接。返回发送成功的数量。
+
+```php
+let $sent = phprs_ws_broadcast("chat:general", "{\"type\":\"message\",\"text\":\"Hello!\"}", $sender_fd);
+echo "Sent to " . $sent . " clients";
+```
+
+### `phprs_ws_broadcast_all(string $message, int $exclude_fd): int`
+
+向所有连接的客户端广播（跨所有房间）。
+
+```php
+phprs_ws_broadcast_all("{\"type\":\"announcement\",\"text\":\"Server will restart\"}", -1);
+```
+
+### `phprs_ws_count(string $room): int`
+
+获取活跃连接数。传空字符串获取总数。
+
+```php
+let $total = phprs_ws_count("");            // 所有连接
+let $chat = phprs_ws_count("chat:general"); // 某房间连接
+```
+
+### `phprs_ws_rooms(): string`
+
+获取所有活跃房间名称的 JSON 数组。
+
+```php
+let $rooms = phprs_ws_rooms();
+// ["chat:general","chat:vip","game:lobby"]
+```
+
+### `phprs_ws_start_heartbeat(int $interval_sec): void`
+
+启动心跳后台线程。按设定间隔发送 Ping 帧，超过 3 倍间隔未响应的连接自动断开。
+
+```php
+phprs_ws_start_heartbeat(30);
+```
+
+### WebSocket 完整示例
+
+```php
+<?phprs
+include "system/runtime.phprs";
+
+// 初始化 WebSocket 管理器和心跳
+phprs_ws_manager_init(30);
+phprs_ws_start_heartbeat(30);
+
+function handle_websocket(int $client, string $raw): void {
+    // WebSocket 握手
+    let $ws_resp = phprs_ws_handshake_response($raw);
+    phprs_socket_write($client, $ws_resp);
+
+    // 注册到聊天房间
+    phprs_ws_register($client, "chat:general");
+
+    // 消息循环
+    while (true) {
+        let $msg = phprs_ws_read_frame($client, 30000);
+        if ($msg == "") {
+            break;  // 连接关闭或超时
+        }
+
+        // 广播给房间内其他人
+        let $broadcast_msg = "{\"type\":\"message\",\"data\":\"" . $msg . "\"}";
+        phprs_ws_broadcast("chat:general", $broadcast_msg, $client);
+    }
+
+    // 清理
+    phprs_ws_unregister($client);
+    phprs_ws_close($client);
+}
+?>
+```
+
+---
+
+## 生产特性总览
+
+| 特性 | 详情 |
+|---------|---------|
+| **线程池** | 固定大小工作线程池，请求队列，每请求 256KB 内存竞技场 |
+| **连接限制** | 可配置最大并发连接数（默认 10,000） |
+| **请求体限制** | 最大请求体大小（默认 10 MB），超过返回 413 |
+| **Socket 超时** | 读（30s）写（60s）超时 |
+| **安全响应头** | 自动注入 X-Content-Type-Options、X-Frame-Options、X-XSS-Protection、Referrer-Policy |
+| **请求 ID** | 每个响应自动生成 X-Request-Id |
+| **访问日志** | 每请求记录，包含真实延迟测量 |
+| **错误日志** | 带时间戳的错误日志，可配置输出 |
+| **健康检查** | GET /health — 上报 uptime、连接数、队列深度 |
+| **Prometheus 指标** | GET /metrics — Prometheus 格式指标 |
+| **IP 限流** | 基于 IP 的滑动窗口限流（4096 桶） |
+| **优雅关闭** | SIGTERM/SIGINT 处理，队列排空 |
+| **日志轮转** | SIGHUP 触发日志文件重新打开 |
+| **PID 文件** | 进程管理 |
+| **内存池** | 每线程 256KB bump allocator，每请求重置 |
+| **内存监控** | 总池内存追踪，超过 512MB 拒绝新请求 |
+| **Redis 连接池** | 8 连接，PING 健康检查 |
+| **MySQL 连接池** | 8 连接，mysql_ping() 健康检查 |
+| **WebSocket 管理器** | 1024 客户端，房间系统，自动心跳 |
+| **CORS** | 可配置 origin、methods、headers |
+| **TLS/HTTPS 客户端** | OpenSSL (POSIX) / Schannel (Windows) |

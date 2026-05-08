@@ -84,6 +84,48 @@ impl TypeEnv {
         env.funcs.insert("phprs_log_init".into(), (vec![Ty::String], Ty::Void));
         env.funcs.insert("phprs_server_init_signals".into(), (vec![], Ty::Void));
         env.funcs.insert("phprs_write_pidfile".into(), (vec![Ty::String], Ty::Void));
+        // Redis client
+        env.funcs.insert("phprs_redis_init".into(), (vec![Ty::String, Ty::Int, Ty::String], Ty::Void));
+        env.funcs.insert("phprs_redis_close".into(), (vec![], Ty::Void));
+        env.funcs.insert("phprs_redis_cmd".into(), (vec![Ty::String], Ty::String));
+        env.funcs.insert("phprs_redis_get".into(), (vec![Ty::String], Ty::String));
+        env.funcs.insert("phprs_redis_set".into(), (vec![Ty::String, Ty::String], Ty::String));
+        env.funcs.insert("phprs_redis_setex".into(), (vec![Ty::String, Ty::Int, Ty::String], Ty::String));
+        env.funcs.insert("phprs_redis_del".into(), (vec![Ty::String], Ty::String));
+        env.funcs.insert("phprs_redis_exists".into(), (vec![Ty::String], Ty::Int));
+        env.funcs.insert("phprs_redis_keys".into(), (vec![Ty::String], Ty::String));
+        env.funcs.insert("phprs_redis_expire".into(), (vec![Ty::String, Ty::Int], Ty::Int));
+        env.funcs.insert("phprs_redis_incr".into(), (vec![Ty::String], Ty::Int));
+        env.funcs.insert("phprs_redis_decr".into(), (vec![Ty::String], Ty::Int));
+        env.funcs.insert("phprs_redis_hget".into(), (vec![Ty::String, Ty::String], Ty::String));
+        env.funcs.insert("phprs_redis_hset".into(), (vec![Ty::String, Ty::String, Ty::String], Ty::String));
+        env.funcs.insert("phprs_redis_hgetall".into(), (vec![Ty::String], Ty::String));
+        env.funcs.insert("phprs_redis_lpush".into(), (vec![Ty::String, Ty::String], Ty::String));
+        env.funcs.insert("phprs_redis_rpush".into(), (vec![Ty::String, Ty::String], Ty::String));
+        env.funcs.insert("phprs_redis_lrange".into(), (vec![Ty::String, Ty::Int, Ty::Int], Ty::String));
+        env.funcs.insert("phprs_redis_ping".into(), (vec![], Ty::String));
+        env.funcs.insert("phprs_redis_ttl".into(), (vec![Ty::String], Ty::Int));
+        env.funcs.insert("phprs_redis_select".into(), (vec![Ty::Int], Ty::String));
+        // MySQL client
+        env.funcs.insert("phprs_mysql_init".into(), (vec![Ty::String, Ty::Int, Ty::String, Ty::String, Ty::String], Ty::Void));
+        env.funcs.insert("phprs_mysql_close".into(), (vec![], Ty::Void));
+        env.funcs.insert("phprs_mysql_escape".into(), (vec![Ty::String], Ty::String));
+        env.funcs.insert("phprs_mysql_query".into(), (vec![Ty::String], Ty::String));
+        env.funcs.insert("phprs_mysql_exec".into(), (vec![Ty::String], Ty::String));
+        env.funcs.insert("phprs_mysql_select".into(), (vec![Ty::String, Ty::String], Ty::String));
+        env.funcs.insert("phprs_mysql_insert".into(), (vec![Ty::String, Ty::String], Ty::String));
+        env.funcs.insert("phprs_mysql_update".into(), (vec![Ty::String, Ty::String, Ty::String], Ty::String));
+        env.funcs.insert("phprs_mysql_delete".into(), (vec![Ty::String, Ty::String], Ty::String));
+        // WebSocket connection manager
+        env.funcs.insert("phprs_ws_manager_init".into(), (vec![Ty::Int], Ty::Void));
+        env.funcs.insert("phprs_ws_register".into(), (vec![Ty::Int, Ty::String], Ty::Int));
+        env.funcs.insert("phprs_ws_unregister".into(), (vec![Ty::Int], Ty::Void));
+        env.funcs.insert("phprs_ws_update_pong".into(), (vec![Ty::Int], Ty::Void));
+        env.funcs.insert("phprs_ws_broadcast".into(), (vec![Ty::String, Ty::String, Ty::Int], Ty::Int));
+        env.funcs.insert("phprs_ws_broadcast_all".into(), (vec![Ty::String, Ty::Int], Ty::Int));
+        env.funcs.insert("phprs_ws_count".into(), (vec![Ty::String], Ty::Int));
+        env.funcs.insert("phprs_ws_rooms".into(), (vec![], Ty::String));
+        env.funcs.insert("phprs_ws_start_heartbeat".into(), (vec![Ty::Int], Ty::Void));
         env
     }
 

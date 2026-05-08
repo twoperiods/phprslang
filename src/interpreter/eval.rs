@@ -2531,8 +2531,42 @@ impl Interpreter {
             "phprs_config" | "phprs_config_max_body" | "phprs_config_timeout"
             | "phprs_config_max_connections" | "phprs_log" | "phprs_log_error_msg"
             | "phprs_log_init" | "phprs_server_init_signals" | "phprs_write_pidfile"
+            // Redis (no-op in interpreter)
+            | "phprs_redis_init" | "phprs_redis_close"
+            // MySQL (no-op in interpreter)
+            | "phprs_mysql_init" | "phprs_mysql_close"
+            // WebSocket manager (no-op in interpreter)
+            | "phprs_ws_manager_init" | "phprs_ws_unregister"
+            | "phprs_ws_update_pong" | "phprs_ws_start_heartbeat"
             => Ok(Value::Null),
             "phprs_is_shutting_down" => Ok(Value::Int(0)),
+            // Redis stubs returning strings
+            "phprs_redis_cmd" | "phprs_redis_get" => Ok(Value::String_("(nil)".to_string())),
+            "phprs_redis_set" | "phprs_redis_setex" => Ok(Value::String_("OK".to_string())),
+            "phprs_redis_del" => Ok(Value::String_("0".to_string())),
+            "phprs_redis_exists" | "phprs_redis_expire" | "phprs_redis_incr"
+            | "phprs_redis_decr" | "phprs_redis_ttl" => Ok(Value::Int(0)),
+            "phprs_redis_keys" | "phprs_redis_hgetall" | "phprs_redis_lrange"
+            => Ok(Value::String_("[]".to_string())),
+            "phprs_redis_hget" => Ok(Value::String_("(nil)".to_string())),
+            "phprs_redis_hset" | "phprs_redis_lpush" | "phprs_redis_rpush"
+            => Ok(Value::String_("0".to_string())),
+            "phprs_redis_ping" => Ok(Value::String_("PONG".to_string())),
+            "phprs_redis_select" => Ok(Value::String_("OK".to_string())),
+            // MySQL stubs
+            "phprs_mysql_escape" => {
+                let s = if !args.is_empty() { match &args[0] { Value::String_(s) => s.clone(), _ => String::new() } } else { String::new() };
+                Ok(Value::String_(s))
+            }
+            "phprs_mysql_query" | "phprs_mysql_exec" | "phprs_mysql_select"
+            => Ok(Value::String_("[]".to_string())),
+            "phprs_mysql_insert" | "phprs_mysql_update" | "phprs_mysql_delete"
+            => Ok(Value::String_("{\"affected_rows\":0}".to_string())),
+            // WebSocket manager stubs
+            "phprs_ws_register" => Ok(Value::Int(0)),
+            "phprs_ws_broadcast" | "phprs_ws_broadcast_all" | "phprs_ws_count"
+            => Ok(Value::Int(0)),
+            "phprs_ws_rooms" => Ok(Value::String_("[]".to_string())),
             // ---- String Validation ----
             "phprs_str_is_alnum" => {
                 if args.len() != 1 { return Err("phprs_str_is_alnum() expects 1 argument".into()); }
@@ -4416,11 +4450,26 @@ impl Interpreter {
             | "fmod" | "intdiv" | "checkdate" | "mktime"
             // Batch 2: Misc
             | "printf" | "str_starts_with" | "str_ends_with"
-            // Production infrastructure (no-op in interpreter)
             | "phprs_config" | "phprs_config_max_body" | "phprs_config_timeout"
             | "phprs_config_max_connections" | "phprs_is_shutting_down"
             | "phprs_log" | "phprs_log_error_msg" | "phprs_log_init"
             | "phprs_server_init_signals" | "phprs_write_pidfile"
+            // Redis
+            | "phprs_redis_init" | "phprs_redis_close" | "phprs_redis_cmd"
+            | "phprs_redis_get" | "phprs_redis_set" | "phprs_redis_setex"
+            | "phprs_redis_del" | "phprs_redis_exists" | "phprs_redis_keys"
+            | "phprs_redis_expire" | "phprs_redis_incr" | "phprs_redis_decr"
+            | "phprs_redis_hget" | "phprs_redis_hset" | "phprs_redis_hgetall"
+            | "phprs_redis_lpush" | "phprs_redis_rpush" | "phprs_redis_lrange"
+            | "phprs_redis_ping" | "phprs_redis_ttl" | "phprs_redis_select"
+            // MySQL
+            | "phprs_mysql_init" | "phprs_mysql_close" | "phprs_mysql_escape"
+            | "phprs_mysql_query" | "phprs_mysql_exec" | "phprs_mysql_select"
+            | "phprs_mysql_insert" | "phprs_mysql_update" | "phprs_mysql_delete"
+            // WebSocket manager
+            | "phprs_ws_manager_init" | "phprs_ws_register" | "phprs_ws_unregister"
+            | "phprs_ws_update_pong" | "phprs_ws_broadcast" | "phprs_ws_broadcast_all"
+            | "phprs_ws_count" | "phprs_ws_rooms" | "phprs_ws_start_heartbeat"
         )
     }
 
