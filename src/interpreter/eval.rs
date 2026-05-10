@@ -2537,6 +2537,7 @@ impl Interpreter {
             "phprs_config" | "phprs_config_max_body" | "phprs_config_timeout"
             | "phprs_config_max_connections" | "phprs_log" | "phprs_log_error_msg"
             | "phprs_log_init" | "phprs_server_init_signals" | "phprs_write_pidfile"
+            | "log_init"
             // Redis (no-op in interpreter)
             | "phprs_redis_init" | "phprs_redis_close"
             // MySQL (no-op in interpreter)
@@ -2545,6 +2546,25 @@ impl Interpreter {
             | "phprs_ws_manager_init" | "phprs_ws_unregister"
             | "phprs_ws_update_pong" | "phprs_ws_start_heartbeat"
             => Ok(Value::Null),
+            "log_debug" | "log_info" | "log_warning" | "log_error" | "log_critical" => {
+                let level = match name {
+                    "log_debug" => "DEBUG",
+                    "log_info" => "INFO",
+                    "log_warning" => "WARNING",
+                    "log_error" => "ERROR",
+                    "log_critical" => "CRITICAL",
+                    _ => "INFO",
+                };
+                let msg = if !args.is_empty() {
+                    match &args[0] { Value::String_(s) => s.clone(), v => format!("{}", v) }
+                } else { String::new() };
+                let ts = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                eprintln!("[{}] [{}] {}", ts, level, msg);
+                Ok(Value::Null)
+            }
             "phprs_is_shutting_down" => Ok(Value::Int(0)),
             // Redis stubs returning strings
             "phprs_redis_cmd" | "phprs_redis_get" => Ok(Value::String_("(nil)".to_string())),
@@ -4467,6 +4487,7 @@ impl Interpreter {
             | "phprs_config" | "phprs_config_max_body" | "phprs_config_timeout"
             | "phprs_config_max_connections" | "phprs_is_shutting_down"
             | "phprs_log" | "phprs_log_error_msg" | "phprs_log_init"
+            | "log_init" | "log_debug" | "log_info" | "log_warning" | "log_error" | "log_critical"
             | "phprs_server_init_signals" | "phprs_write_pidfile"
             // Redis
             | "phprs_redis_init" | "phprs_redis_close" | "phprs_redis_cmd"

@@ -278,6 +278,12 @@ impl CTranspiler {
             ("phprs_log", "void"),
             ("phprs_log_error_msg", "void"),
             ("phprs_log_init", "void"),
+            ("log_init", "void"),
+            ("log_debug", "void"),
+            ("log_info", "void"),
+            ("log_warning", "void"),
+            ("log_error", "void"),
+            ("log_critical", "void"),
             ("phprs_server_init_signals", "void"),
             ("phprs_write_pidfile", "void"),
             // Redis client

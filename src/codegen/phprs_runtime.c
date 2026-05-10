@@ -3376,6 +3376,85 @@ void phprs_log_error_msg(const char* msg) {
 }
 
 // ===========================================================================
+// ---- Standard Logger (with levels and configurable output file) ----
+// ===========================================================================
+
+#define PHPRS_LOG_DEBUG    0
+#define PHPRS_LOG_INFO     1
+#define PHPRS_LOG_WARNING  2
+#define PHPRS_LOG_ERROR    3
+#define PHPRS_LOG_CRITICAL 4
+
+static FILE* phprs_logger_fp = NULL;
+static int phprs_logger_level = PHPRS_LOG_DEBUG;
+static char phprs_logger_path[512] = "";
+
+static const char* phprs_log_level_name(int level) {
+    switch (level) {
+        case PHPRS_LOG_DEBUG:    return "DEBUG";
+        case PHPRS_LOG_INFO:     return "INFO";
+        case PHPRS_LOG_WARNING:  return "WARNING";
+        case PHPRS_LOG_ERROR:    return "ERROR";
+        case PHPRS_LOG_CRITICAL: return "CRITICAL";
+        default: return "UNKNOWN";
+    }
+}
+
+static int phprs_parse_log_level(const char* level) {
+    if (!level || !level[0]) return PHPRS_LOG_DEBUG;
+    if (strcasecmp(level, "debug") == 0) return PHPRS_LOG_DEBUG;
+    if (strcasecmp(level, "info") == 0) return PHPRS_LOG_INFO;
+    if (strcasecmp(level, "warning") == 0 || strcasecmp(level, "warn") == 0) return PHPRS_LOG_WARNING;
+    if (strcasecmp(level, "error") == 0) return PHPRS_LOG_ERROR;
+    if (strcasecmp(level, "critical") == 0 || strcasecmp(level, "fatal") == 0) return PHPRS_LOG_CRITICAL;
+    return PHPRS_LOG_DEBUG;
+}
+
+static void phprs_logger_write(int level, const char* msg) {
+    if (level < phprs_logger_level) return;
+    if (!phprs_logger_fp) phprs_logger_fp = stderr;
+    time_t now = time(NULL);
+    struct tm tm_buf;
+    char ts[32];
+#ifdef _WIN32
+    localtime_s(&tm_buf, &now);
+#else
+    localtime_r(&now, &tm_buf);
+#endif
+    strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", &tm_buf);
+#ifndef _WIN32
+    pthread_mutex_lock(&phprs_log_mutex);
+#endif
+    fprintf(phprs_logger_fp, "[%s] [%s] %s\n", ts, phprs_log_level_name(level), msg ? msg : "");
+    fflush(phprs_logger_fp);
+#ifndef _WIN32
+    pthread_mutex_unlock(&phprs_log_mutex);
+#endif
+}
+
+void log_init(const char* path, const char* level) {
+    phprs_logger_level = phprs_parse_log_level(level);
+    if (!path || !path[0] || strcmp(path, "-") == 0) {
+        phprs_logger_fp = stdout;
+        phprs_logger_path[0] = '\0';
+    } else if (strcmp(path, "stderr") == 0) {
+        phprs_logger_fp = stderr;
+        phprs_logger_path[0] = '\0';
+    } else {
+        strncpy(phprs_logger_path, path, sizeof(phprs_logger_path) - 1);
+        phprs_logger_path[sizeof(phprs_logger_path) - 1] = '\0';
+        phprs_logger_fp = fopen(path, "a");
+        if (!phprs_logger_fp) phprs_logger_fp = stderr;
+    }
+}
+
+void log_debug(const char* msg) { phprs_logger_write(PHPRS_LOG_DEBUG, msg); }
+void log_info(const char* msg) { phprs_logger_write(PHPRS_LOG_INFO, msg); }
+void log_warning(const char* msg) { phprs_logger_write(PHPRS_LOG_WARNING, msg); }
+void log_error(const char* msg) { phprs_logger_write(PHPRS_LOG_ERROR, msg); }
+void log_critical(const char* msg) { phprs_logger_write(PHPRS_LOG_CRITICAL, msg); }
+
+// ===========================================================================
 // ---- End Production Infrastructure ----
 // ===========================================================================
 

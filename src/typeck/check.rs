@@ -85,6 +85,12 @@ impl TypeEnv {
         env.funcs.insert("phprs_log".into(), (vec![Ty::String], Ty::Void));
         env.funcs.insert("phprs_log_error_msg".into(), (vec![Ty::String], Ty::Void));
         env.funcs.insert("phprs_log_init".into(), (vec![Ty::String], Ty::Void));
+        env.funcs.insert("log_init".into(), (vec![Ty::String, Ty::String], Ty::Void));
+        env.funcs.insert("log_debug".into(), (vec![Ty::String], Ty::Void));
+        env.funcs.insert("log_info".into(), (vec![Ty::String], Ty::Void));
+        env.funcs.insert("log_warning".into(), (vec![Ty::String], Ty::Void));
+        env.funcs.insert("log_error".into(), (vec![Ty::String], Ty::Void));
+        env.funcs.insert("log_critical".into(), (vec![Ty::String], Ty::Void));
         env.funcs.insert("phprs_server_init_signals".into(), (vec![], Ty::Void));
         env.funcs.insert("phprs_write_pidfile".into(), (vec![Ty::String], Ty::Void));
         // Redis client
