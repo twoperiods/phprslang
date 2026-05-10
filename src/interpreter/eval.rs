@@ -61,6 +61,7 @@ pub struct Interpreter {
     cors_origin: String,
     cors_methods: String,
     cors_headers: String,
+    script_argv: Vec<String>,
 }
 
 // Helper: convert a Value to a string key for hashing/comparison
@@ -92,9 +93,14 @@ impl Interpreter {
             cors_origin: "*".to_string(),
             cors_methods: "GET,POST,PUT,DELETE,PATCH,OPTIONS".to_string(),
             cors_headers: "Content-Type,Authorization".to_string(),
+            script_argv: Vec::new(),
         };
         interpreter.register_builtins();
         interpreter
+    }
+
+    pub fn set_argv(&mut self, args: &[String]) {
+        self.script_argv = args.to_vec();
     }
 
     fn register_builtins(&mut self) {
@@ -3343,6 +3349,10 @@ impl Interpreter {
 
     pub fn interpret(&mut self, program: &Program) -> Result<(), String> {
         let mut env = Environment::new();
+        env.define("argc".into(), Value::Int(self.script_argv.len() as i64));
+        env.define("argv".into(), Value::Array(
+            self.script_argv.iter().map(|s| Value::String_(s.clone())).collect()
+        ));
         for stmt in &program.stmts {
             match self.eval_in_env(stmt, &mut env) {
                 Ok(_) => {}
@@ -3356,6 +3366,10 @@ impl Interpreter {
 
     pub fn eval_program(&mut self, program: &Program) -> Result<Value, String> {
         let mut env = Environment::new();
+        env.define("argc".into(), Value::Int(self.script_argv.len() as i64));
+        env.define("argv".into(), Value::Array(
+            self.script_argv.iter().map(|s| Value::String_(s.clone())).collect()
+        ));
         let mut last = Value::Null;
         for stmt in &program.stmts {
             match self.eval_in_env(stmt, &mut env) {

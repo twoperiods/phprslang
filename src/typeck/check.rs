@@ -14,6 +14,9 @@ impl TypeEnv {
             vars: HashMap::new(),
             funcs: HashMap::new(),
         };
+        // Built-in superglobals
+        env.vars.insert("argc".into(), Ty::Int);
+        env.vars.insert("argv".into(), Ty::Array(Box::new(Ty::String)));
         // Register builtins
         env.funcs.insert("strlen".into(), (vec![Ty::String], Ty::Int));
         env.funcs.insert("count".into(), (vec![Ty::Array(Box::new(Ty::Unknown))], Ty::Int));

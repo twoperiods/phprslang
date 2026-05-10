@@ -32,6 +32,7 @@ pub fn compile_to_c(program: &MirProgram) -> String {
     // Generate main
     if program.functions.iter().any(|f| f.name == "__main") {
         out.push_str("int main(int argc, char** argv) {\n");
+        out.push_str("    phprs_init_args(argc, argv);\n");
         out.push_str("    return __main();\n");
         out.push_str("}\n");
     }

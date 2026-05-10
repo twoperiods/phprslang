@@ -20,12 +20,18 @@ pub fn run(source: &str) -> Result<String, String> {
 
 /// Compile and run with include resolution relative to source_path.
 pub fn run_with_path(source: &str, source_path: Option<&Path>) -> Result<String, String> {
+    run_with_args(source, source_path, &[])
+}
+
+/// Compile and run with script arguments ($argv/$argc).
+pub fn run_with_args(source: &str, source_path: Option<&Path>, script_args: &[String]) -> Result<String, String> {
     let processed = preprocess_source(source, source_path)?;
     let mut lexer = Lexer::new(&processed);
     let tokens = lexer.tokenize()?;
     let mut parser = Parser::new(tokens);
     let program = parser.parse_program()?;
     let mut interpreter = Interpreter::new();
+    interpreter.set_argv(script_args);
     interpreter.interpret(&program)?;
     Ok("OK".to_string())
 }

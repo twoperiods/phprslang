@@ -9,6 +9,23 @@ int64_t count(int64_t* arr) {
     return __array_len_dummy;
 }
 
+static int phprs_g_argc = 0;
+static char** phprs_g_argv = NULL;
+
+void phprs_init_args(int argc, char** argv) {
+    phprs_g_argc = argc;
+    phprs_g_argv = argv;
+}
+
+int64_t phprs_argc(void) {
+    return (int64_t)phprs_g_argc;
+}
+
+const char* phprs_argv_get(int64_t index) {
+    if (index < 0 || index >= phprs_g_argc) return "";
+    return phprs_g_argv[index];
+}
+
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
     #include <winsock2.h>

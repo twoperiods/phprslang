@@ -355,6 +355,15 @@ impl CTranspiler {
             self.emitln("");
             self.emitln("int main(int argc, char** argv) {");
             self.indent += 1;
+            self.emitln("phprs_init_args(argc, argv);");
+            self.emitln("int64_t _p_argc = (int64_t)argc;");
+            self.emitln("const char** _p_argv = (const char**)argv;");
+            self.emitln("int _p_argv_len = argc;");
+            self.vars.insert("argc".into(), "_p_argc".into());
+            self.var_types.insert("argc".into(), "int64_t".into());
+            self.vars.insert("argv".into(), "_p_argv".into());
+            self.var_types.insert("argv".into(), "const char**".into());
+            self.var_array_lens.insert("argv".into(), "_p_argv_len".into());
             // Register handler functions for thread dispatch
             for name in &handler_funcs {
                 self.emitln(&format!("phprs_register_handler(\"{}\", (phprs_handler_fn){});", name, name));
@@ -1243,6 +1252,25 @@ impl CTranspiler {
                     self.write(if *is_inc { "++" } else { "--" });
                 }
                 self.write(")");
+            }
+            Expr::Index { target, index } => {
+                let is_string_array = if let Expr::Variable(name) = target.as_ref() {
+                    self.var_types.get(name).map(|t| t == "const char**").unwrap_or(false)
+                } else {
+                    false
+                };
+                if is_string_array {
+                    self.transpile_expr(target);
+                    self.write("[");
+                    self.transpile_expr(index);
+                    self.write("]");
+                } else {
+                    self.write("__itos(");
+                    self.transpile_expr(target);
+                    self.write("[");
+                    self.transpile_expr(index);
+                    self.write("])");
+                }
             }
             _ => {
                 self.write("\"\" /* non-string expr */");

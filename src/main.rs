@@ -27,13 +27,14 @@ fn main() {
 
 fn cmd_run(args: &[String]) {
     if args.len() < 3 {
-        eprintln!("Usage: phprs run <file.phprs>");
+        eprintln!("Usage: phprs run <file.phprs> [-- arg1 arg2 ...]");
         process::exit(1);
     }
     let path = &args[2];
     let source = read_file(path);
     let source_path = Path::new(path);
-    match phprs::run_with_path(&source, Some(source_path)) {
+    let script_args = build_script_args(path, args, 3);
+    match phprs::run_with_args(&source, Some(source_path), &script_args) {
         Ok(_) => println!(),
         Err(e) => {
             eprintln!("Error: {}", e);
@@ -135,6 +136,27 @@ fn cmd_create_project(args: &[String]) {
             process::exit(1);
         }
     }
+}
+
+fn build_script_args(script_path: &str, args: &[String], start: usize) -> Vec<String> {
+    let mut script_args = vec![script_path.to_string()];
+    let mut i = start;
+    while i < args.len() {
+        if args[i] == "--" {
+            i += 1;
+            break;
+        }
+        if args[i] == "-o" {
+            i += 2;
+            continue;
+        }
+        break;
+    }
+    while i < args.len() {
+        script_args.push(args[i].clone());
+        i += 1;
+    }
+    script_args
 }
 
 fn print_usage() {
