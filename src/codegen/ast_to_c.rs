@@ -455,8 +455,13 @@ impl CTranspiler {
             Expr::Assign { value, .. } => self.infer_expr_type(value),
             Expr::IncDec { target, .. } => self.infer_expr_type(target),
             Expr::Unary { op: _, right } => self.infer_expr_type(right),
-            Expr::Index { .. } => {
-                // Arrays are always int64_t in the simple C backend
+            Expr::Index { target, .. } => {
+                if let Expr::Variable(name) = target.as_ref() {
+                    let arr_type = self.var_types.get(name).map(|s| s.as_str()).unwrap_or("");
+                    if arr_type == "const char**" || arr_type == "const char*" {
+                        return "const char*".to_string();
+                    }
+                }
                 "int64_t".to_string()
             }
             _ => "int64_t".to_string(),
