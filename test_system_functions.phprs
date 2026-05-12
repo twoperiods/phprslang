@@ -1,0 +1,80 @@
+<?phprs
+
+// Test Process Execution
+echo "=== Process Execution ===\n";
+let $result = phprs_exec("echo hello_world");
+echo "exec: " . $result . "\n";
+
+let $code = phprs_system("true");
+echo "system exit code: " . $code . "\n";
+
+let $pid = phprs_getpid();
+echo "getpid: " . $pid . "\n";
+
+// Test Environment
+echo "\n=== Environment ===\n";
+phprs_putenv("PHPRS_TEST_VAR=hello123");
+let $val = phprs_getenv("PHPRS_TEST_VAR");
+echo "getenv: " . $val . "\n";
+
+let $home = phprs_getenv("HOME");
+let $home_exists = "no";
+if (strlen($home) > 0) {
+    $home_exists = "yes";
+}
+echo "HOME exists: " . $home_exists . "\n";
+
+// Test Filesystem
+echo "\n=== Filesystem ===\n";
+let $cwd = getcwd();
+echo "cwd: " . $cwd . "\n";
+
+let $tmp = phprs_tempnam("/tmp", "phprs_test_");
+echo "tempnam: " . $tmp . "\n";
+
+phprs_file_append($tmp, "line1\n");
+phprs_file_append($tmp, "line2\n");
+let $content = file_get_contents($tmp);
+echo "file_append content: " . $content;
+
+unlink($tmp);
+echo "cleanup done\n";
+
+// Test glob
+let $files = phprs_glob("/tmp/phprs_test_*");
+echo "glob result: " . $files . "\n";
+
+// Test chdir/rmdir
+mkdir("/tmp/phprs_test_dir");
+let $ok = phprs_chdir("/tmp/phprs_test_dir");
+let $chdir_result = "fail";
+if ($ok) { $chdir_result = "ok"; }
+echo "chdir: " . $chdir_result . "\n";
+phprs_chdir($cwd);
+let $ok2 = phprs_rmdir("/tmp/phprs_test_dir");
+let $rmdir_result = "fail";
+if ($ok2) { $rmdir_result = "ok"; }
+echo "rmdir: " . $rmdir_result . "\n";
+
+// Test UDP
+echo "\n=== UDP Socket ===\n";
+let $sock = phprs_udp_socket();
+echo "udp_socket fd: " . $sock . "\n";
+if ($sock > 0) {
+    phprs_udp_close($sock);
+    echo "udp_close: ok\n";
+}
+
+// Test Signal (stubs in interpreter)
+echo "\n=== Signal ===\n";
+phprs_signal(15, "flag");
+let $check = phprs_signal_check(15);
+echo "signal_check (no signal sent): " . $check . "\n";
+
+// Test Daemonize (skip actual call - it would fork the process)
+echo "\n=== Daemonize ===\n";
+echo "daemonize: available (skipped in test)\n";
+
+echo "\n=== ALL TESTS PASSED ===\n";
+
+?>

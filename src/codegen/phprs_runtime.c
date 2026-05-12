@@ -76,8 +76,14 @@ const char* phprs_argv_get(int64_t index) {
 #include <signal.h>
 #ifndef _WIN32
 #include <sys/time.h>
+#include <sys/wait.h>
+#include <sys/ioctl.h>
 #include <netinet/tcp.h>
 #include <pthread.h>
+#include <glob.h>
+#else
+#include <direct.h>
+#include <io.h>
 #endif
 
 // ---- MySQL Client (via libmysqlclient) ----
@@ -6245,5 +6251,455 @@ void phprs_ws_start_heartbeat(int64_t interval_sec) {
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
     pthread_create(&tid, &attr, phprs_ws_heartbeat_worker, NULL);
     pthread_attr_destroy(&attr);
+#endif
+}
+
+// ===========================================================================
+// ---- Process Execution ----
+// ===========================================================================
+
+const char* phprs_exec(const char* cmd) {
+    if (!cmd || !*cmd) return strdup("");
+#ifdef _WIN32
+    FILE* fp = _popen(cmd, "r");
+#else
+    FILE* fp = popen(cmd, "r");
+#endif
+    if (!fp) return strdup("");
+    size_t cap = 4096, len = 0;
+    char* buf = (char*)malloc(cap);
+    if (!buf) { pclose(fp); return strdup(""); }
+    char line[1024];
+    while (fgets(line, sizeof(line), fp)) {
+        size_t ll = strlen(line);
+        if (len + ll >= cap) { cap *= 2; buf = (char*)realloc(buf, cap); }
+        memcpy(buf + len, line, ll);
+        len += ll;
+    }
+    buf[len] = '\0';
+    // Trim trailing newline
+    while (len > 0 && (buf[len-1] == '\n' || buf[len-1] == '\r')) buf[--len] = '\0';
+#ifdef _WIN32
+    _pclose(fp);
+#else
+    pclose(fp);
+#endif
+    return buf;
+}
+
+const char* phprs_shell_exec(const char* cmd) {
+    return phprs_exec(cmd);
+}
+
+int64_t phprs_system(const char* cmd) {
+    if (!cmd || !*cmd) return -1;
+    int ret = system(cmd);
+#ifdef _WIN32
+    return (int64_t)ret;
+#else
+    return WIFEXITED(ret) ? (int64_t)WEXITSTATUS(ret) : (int64_t)-1;
+#endif
+}
+
+static struct { FILE* fp; int active; } phprs_popen_handles[64];
+static int phprs_popen_count = 0;
+
+int64_t phprs_popen(const char* cmd, const char* mode) {
+    if (!cmd || !mode) return -1;
+#ifdef _WIN32
+    FILE* fp = _popen(cmd, mode);
+#else
+    FILE* fp = popen(cmd, mode);
+#endif
+    if (!fp) return -1;
+    for (int i = 0; i < 64; i++) {
+        if (!phprs_popen_handles[i].active) {
+            phprs_popen_handles[i].fp = fp;
+            phprs_popen_handles[i].active = 1;
+            if (i >= phprs_popen_count) phprs_popen_count = i + 1;
+            return (int64_t)i;
+        }
+    }
+    pclose(fp);
+    return -1;
+}
+
+int64_t phprs_pclose(int64_t handle) {
+    if (handle < 0 || handle >= 64 || !phprs_popen_handles[handle].active) return -1;
+    int ret;
+#ifdef _WIN32
+    ret = _pclose(phprs_popen_handles[handle].fp);
+#else
+    ret = pclose(phprs_popen_handles[handle].fp);
+    ret = WIFEXITED(ret) ? WEXITSTATUS(ret) : -1;
+#endif
+    phprs_popen_handles[handle].active = 0;
+    phprs_popen_handles[handle].fp = NULL;
+    return (int64_t)ret;
+}
+
+int64_t phprs_getpid(void) {
+#ifdef _WIN32
+    return (int64_t)GetCurrentProcessId();
+#else
+    return (int64_t)getpid();
+#endif
+}
+
+int64_t phprs_posix_kill(int64_t pid, int64_t sig) {
+#ifdef _WIN32
+    HANDLE h = OpenProcess(PROCESS_TERMINATE, FALSE, (DWORD)pid);
+    if (!h) return 0;
+    BOOL ok = TerminateProcess(h, (UINT)sig);
+    CloseHandle(h);
+    return ok ? 1 : 0;
+#else
+    return kill((pid_t)pid, (int)sig) == 0 ? 1 : 0;
+#endif
+}
+
+// ===========================================================================
+// ---- Stdin / Environment / Exit ----
+// ===========================================================================
+
+const char* phprs_readline(const char* prompt) {
+    if (prompt && *prompt) {
+        fputs(prompt, stdout);
+        fflush(stdout);
+    }
+    char buf[4096];
+    if (!fgets(buf, sizeof(buf), stdin)) return strdup("");
+    size_t len = strlen(buf);
+    while (len > 0 && (buf[len-1] == '\n' || buf[len-1] == '\r')) buf[--len] = '\0';
+    return strdup(buf);
+}
+
+const char* phprs_fgets_stdin(void) {
+    return phprs_readline("");
+}
+
+const char* phprs_stdin_read(int64_t bytes) {
+    if (bytes <= 0) return strdup("");
+    char* buf = (char*)malloc((size_t)bytes + 1);
+    if (!buf) return strdup("");
+    size_t n = fread(buf, 1, (size_t)bytes, stdin);
+    buf[n] = '\0';
+    return buf;
+}
+
+int64_t phprs_stdin_eof(void) {
+    return feof(stdin) ? 1 : 0;
+}
+
+const char* phprs_getenv(const char* name) {
+    if (!name) return strdup("");
+    const char* val = getenv(name);
+    return strdup(val ? val : "");
+}
+
+int64_t phprs_putenv(const char* pair) {
+    if (!pair) return 0;
+#ifdef _WIN32
+    return _putenv(pair) == 0 ? 1 : 0;
+#else
+    char* dup = strdup(pair);
+    return putenv(dup) == 0 ? 1 : 0;
+#endif
+}
+
+void phprs_exit(int64_t code) {
+    exit((int)code);
+}
+
+// ===========================================================================
+// ---- Daemonize / Signal ----
+// ===========================================================================
+
+#define PHPRS_MAX_SIGNALS 64
+static volatile int phprs_signal_flags[PHPRS_MAX_SIGNALS];
+
+static void phprs_user_signal_handler(int sig) {
+    if (sig >= 0 && sig < PHPRS_MAX_SIGNALS) phprs_signal_flags[sig] = 1;
+}
+
+int64_t phprs_daemonize(void) {
+#ifdef _WIN32
+    return -1;
+#else
+    pid_t pid = fork();
+    if (pid < 0) return -1;
+    if (pid > 0) _exit(0);
+    if (setsid() < 0) return -1;
+    pid = fork();
+    if (pid < 0) return -1;
+    if (pid > 0) _exit(0);
+    close(STDIN_FILENO);
+    close(STDOUT_FILENO);
+    close(STDERR_FILENO);
+    open("/dev/null", O_RDONLY);
+    open("/dev/null", O_WRONLY);
+    open("/dev/null", O_WRONLY);
+    return 0;
+#endif
+}
+
+void phprs_signal(int64_t sig, const char* action) {
+    if (sig < 0 || sig >= PHPRS_MAX_SIGNALS || !action) return;
+    if (strcmp(action, "ignore") == 0) {
+        signal((int)sig, SIG_IGN);
+    } else if (strcmp(action, "default") == 0) {
+        signal((int)sig, SIG_DFL);
+    } else if (strcmp(action, "flag") == 0) {
+        phprs_signal_flags[sig] = 0;
+        signal((int)sig, phprs_user_signal_handler);
+    }
+}
+
+int64_t phprs_signal_check(int64_t sig) {
+    if (sig < 0 || sig >= PHPRS_MAX_SIGNALS) return 0;
+    return phprs_signal_flags[sig] ? 1 : 0;
+}
+
+void phprs_signal_clear(int64_t sig) {
+    if (sig >= 0 && sig < PHPRS_MAX_SIGNALS) phprs_signal_flags[sig] = 0;
+}
+
+int64_t phprs_setuid(int64_t uid) {
+#ifdef _WIN32
+    return 0;
+#else
+    return setuid((uid_t)uid) == 0 ? 1 : 0;
+#endif
+}
+
+int64_t phprs_chroot(const char* path) {
+#ifdef _WIN32
+    return 0;
+#else
+    if (!path) return 0;
+    return chroot(path) == 0 ? 1 : 0;
+#endif
+}
+
+// ===========================================================================
+// ---- UDP Socket ----
+// ===========================================================================
+
+int64_t phprs_udp_socket(void) {
+#ifdef _WIN32
+    phprs_winsock_init();
+    SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    return s == INVALID_SOCKET ? -1 : (int64_t)s;
+#else
+    int s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    return s < 0 ? -1 : (int64_t)s;
+#endif
+}
+
+int64_t phprs_udp_bind(int64_t fd, int64_t port) {
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_port = htons((unsigned short)port);
+    int ret = bind((int)fd, (struct sockaddr*)&addr, sizeof(addr));
+    return ret == 0 ? 0 : -1;
+}
+
+int64_t phprs_udp_sendto(int64_t fd, const char* data, const char* host, int64_t port) {
+    if (!data || !host) return -1;
+    const char* ip = phprs_dns_resolve(host);
+    if (!ip || !*ip) return -1;
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons((unsigned short)port);
+    inet_pton(AF_INET, ip, &addr.sin_addr);
+    free((void*)ip);
+    int n = sendto((int)fd, data, (int)strlen(data), 0, (struct sockaddr*)&addr, sizeof(addr));
+    return (int64_t)n;
+}
+
+const char* phprs_udp_recvfrom(int64_t fd, int64_t maxsize) {
+    if (maxsize <= 0) return strdup("{\"data\":\"\",\"host\":\"\",\"port\":0}");
+    char* buf = (char*)malloc((size_t)maxsize + 1);
+    if (!buf) return strdup("{\"data\":\"\",\"host\":\"\",\"port\":0}");
+    struct sockaddr_in from;
+    socklen_t fromlen = sizeof(from);
+    int n = recvfrom((int)fd, buf, (int)maxsize, 0, (struct sockaddr*)&from, &fromlen);
+    if (n < 0) { free(buf); return strdup("{\"data\":\"\",\"host\":\"\",\"port\":0}"); }
+    buf[n] = '\0';
+    char ip[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &from.sin_addr, ip, sizeof(ip));
+    int rport = ntohs(from.sin_port);
+    size_t rlen = (size_t)n + 128;
+    char* result = (char*)malloc(rlen);
+    snprintf(result, rlen, "{\"data\":\"%.*s\",\"host\":\"%s\",\"port\":%d}", n, buf, ip, rport);
+    free(buf);
+    return result;
+}
+
+void phprs_udp_close(int64_t fd) {
+#ifdef _WIN32
+    closesocket((SOCKET)fd);
+#else
+    close((int)fd);
+#endif
+}
+
+// ===========================================================================
+// ---- Enhanced Filesystem ----
+// ===========================================================================
+
+int64_t phprs_chdir(const char* path) {
+    if (!path) return 0;
+#ifdef _WIN32
+    return _chdir(path) == 0 ? 1 : 0;
+#else
+    return chdir(path) == 0 ? 1 : 0;
+#endif
+}
+
+int64_t phprs_rmdir(const char* path) {
+    if (!path) return 0;
+#ifdef _WIN32
+    return RemoveDirectoryA(path) ? 1 : 0;
+#else
+    return rmdir(path) == 0 ? 1 : 0;
+#endif
+}
+
+const char* phprs_glob(const char* pattern) {
+    if (!pattern) return strdup("[]");
+#ifdef _WIN32
+    WIN32_FIND_DATAA fd;
+    HANDLE h = FindFirstFileA(pattern, &fd);
+    if (h == INVALID_HANDLE_VALUE) return strdup("[]");
+    size_t cap = 4096, len = 1;
+    char* buf = (char*)malloc(cap);
+    buf[0] = '[';
+    int first = 1;
+    do {
+        size_t nlen = strlen(fd.cFileName);
+        size_t need = len + nlen + 4;
+        if (need >= cap) { cap *= 2; buf = (char*)realloc(buf, cap); }
+        if (!first) buf[len++] = ',';
+        buf[len++] = '"';
+        memcpy(buf + len, fd.cFileName, nlen); len += nlen;
+        buf[len++] = '"';
+        first = 0;
+    } while (FindNextFileA(h, &fd));
+    FindClose(h);
+    buf[len++] = ']';
+    buf[len] = '\0';
+    return buf;
+#else
+    glob_t g;
+    if (glob(pattern, GLOB_NOSORT, NULL, &g) != 0) return strdup("[]");
+    size_t cap = 4096, len = 1;
+    char* buf = (char*)malloc(cap);
+    buf[0] = '[';
+    for (size_t i = 0; i < g.gl_pathc; i++) {
+        size_t nlen = strlen(g.gl_pathv[i]);
+        size_t need = len + nlen + 4;
+        if (need >= cap) { cap *= 2; buf = (char*)realloc(buf, cap); }
+        if (i > 0) buf[len++] = ',';
+        buf[len++] = '"';
+        memcpy(buf + len, g.gl_pathv[i], nlen); len += nlen;
+        buf[len++] = '"';
+    }
+    globfree(&g);
+    buf[len++] = ']';
+    buf[len] = '\0';
+    return buf;
+#endif
+}
+
+int64_t phprs_chmod(const char* path, int64_t mode) {
+#ifdef _WIN32
+    (void)mode;
+    return 0;
+#else
+    if (!path) return 0;
+    return chmod(path, (mode_t)mode) == 0 ? 1 : 0;
+#endif
+}
+
+const char* phprs_tempnam(const char* dir, const char* prefix) {
+    if (!dir) dir = "/tmp";
+    if (!prefix) prefix = "phprs";
+#ifdef _WIN32
+    char buf[MAX_PATH];
+    if (GetTempFileNameA(dir, prefix, 0, buf)) return strdup(buf);
+    return strdup("");
+#else
+    char tmpl[1024];
+    snprintf(tmpl, sizeof(tmpl), "%s/%sXXXXXX", dir, prefix);
+    int fd = mkstemp(tmpl);
+    if (fd < 0) return strdup("");
+    close(fd);
+    return strdup(tmpl);
+#endif
+}
+
+int64_t phprs_file_append(const char* path, const char* data) {
+    if (!path || !data) return -1;
+    FILE* f = fopen(path, "ab");
+    if (!f) return -1;
+    size_t len = strlen(data);
+    size_t n = fwrite(data, 1, len, f);
+    fclose(f);
+    return (int64_t)n;
+}
+
+// ===========================================================================
+// ---- Raw Socket Enhancements ----
+// ===========================================================================
+
+void phprs_socket_set_timeout(int64_t fd, int64_t sec) {
+#ifdef _WIN32
+    DWORD timeout = (DWORD)(sec * 1000);
+    setsockopt((SOCKET)fd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
+    setsockopt((SOCKET)fd, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout, sizeof(timeout));
+#else
+    struct timeval tv = { (time_t)sec, 0 };
+    setsockopt((int)fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt((int)fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+#endif
+}
+
+const char* phprs_socket_read_bytes(int64_t fd, int64_t n) {
+    if (n <= 0) return strdup("");
+    char* buf = (char*)malloc((size_t)n + 1);
+    if (!buf) return strdup("");
+    size_t total = 0;
+    while ((int64_t)total < n) {
+        int r = recv((int)fd, buf + total, (int)(n - (int64_t)total), 0);
+        if (r <= 0) break;
+        total += (size_t)r;
+    }
+    buf[total] = '\0';
+    return buf;
+}
+
+const char* phprs_socket_peek(int64_t fd, int64_t n) {
+    if (n <= 0) return strdup("");
+    char* buf = (char*)malloc((size_t)n + 1);
+    if (!buf) return strdup("");
+    int r = recv((int)fd, buf, (int)n, MSG_PEEK);
+    if (r < 0) r = 0;
+    buf[r] = '\0';
+    return buf;
+}
+
+int64_t phprs_socket_available(int64_t fd) {
+#ifdef _WIN32
+    u_long avail = 0;
+    ioctlsocket((SOCKET)fd, FIONREAD, &avail);
+    return (int64_t)avail;
+#else
+    int avail = 0;
+    ioctl((int)fd, FIONREAD, &avail);
+    return (int64_t)avail;
 #endif
 }

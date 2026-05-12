@@ -3,13 +3,14 @@ use crate::interpreter::value::*;
 use std::collections::HashMap;
 use sha1::{Digest, Sha1};
 use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::{TcpListener, TcpStream, UdpSocket};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
 enum SocketWrapper {
     Tcp(TcpStream),
     Tls(Box<native_tls::TlsStream<TcpStream>>),
+    Udp(UdpSocket),
 }
 
 impl Read for SocketWrapper {
@@ -17,6 +18,7 @@ impl Read for SocketWrapper {
         match self {
             SocketWrapper::Tcp(s) => s.read(buf),
             SocketWrapper::Tls(s) => s.read(buf),
+            SocketWrapper::Udp(_) => Err(std::io::Error::new(std::io::ErrorKind::Other, "use recvfrom for UDP")),
         }
     }
 }
@@ -26,12 +28,14 @@ impl Write for SocketWrapper {
         match self {
             SocketWrapper::Tcp(s) => s.write(buf),
             SocketWrapper::Tls(s) => s.write(buf),
+            SocketWrapper::Udp(_) => Err(std::io::Error::new(std::io::ErrorKind::Other, "use sendto for UDP")),
         }
     }
     fn flush(&mut self) -> std::io::Result<()> {
         match self {
             SocketWrapper::Tcp(s) => s.flush(),
             SocketWrapper::Tls(s) => s.flush(),
+            SocketWrapper::Udp(_) => Ok(()),
         }
     }
 }
@@ -2593,6 +2597,434 @@ impl Interpreter {
             "phprs_ws_broadcast" | "phprs_ws_broadcast_all" | "phprs_ws_count"
             => Ok(Value::Int(0)),
             "phprs_ws_rooms" => Ok(Value::String_("[]".to_string())),
+
+            // ---- Process Execution ----
+            "phprs_exec" | "phprs_shell_exec" => {
+                if args.len() != 1 { return Err("phprs_exec() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::String_(cmd) => {
+                        eprintln!("[phprs warning] exec() called in interpreter mode — use compiled binaries for production");
+                        let output = std::process::Command::new(if cfg!(windows) { "cmd" } else { "sh" })
+                            .args(if cfg!(windows) { vec!["/C", cmd.as_str()] } else { vec!["-c", cmd.as_str()] })
+                            .output();
+                        match output {
+                            Ok(o) => {
+                                let mut s = String::from_utf8_lossy(&o.stdout).to_string();
+                                while s.ends_with('\n') || s.ends_with('\r') { s.pop(); }
+                                Ok(Value::String_(s))
+                            }
+                            Err(e) => Ok(Value::String_(format!("error: {}", e))),
+                        }
+                    }
+                    _ => Err("phprs_exec() expects a string".into()),
+                }
+            }
+            "phprs_system" => {
+                if args.len() != 1 { return Err("phprs_system() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::String_(cmd) => {
+                        eprintln!("[phprs warning] system() called in interpreter mode — use compiled binaries for production");
+                        let status = std::process::Command::new(if cfg!(windows) { "cmd" } else { "sh" })
+                            .args(if cfg!(windows) { vec!["/C", cmd.as_str()] } else { vec!["-c", cmd.as_str()] })
+                            .status();
+                        match status {
+                            Ok(s) => Ok(Value::Int(s.code().unwrap_or(-1) as i64)),
+                            Err(_) => Ok(Value::Int(-1)),
+                        }
+                    }
+                    _ => Err("phprs_system() expects a string".into()),
+                }
+            }
+            "phprs_popen" => {
+                if args.len() != 2 { return Err("phprs_popen() expects 2 arguments".into()); }
+                eprintln!("[phprs warning] popen() called in interpreter mode — use compiled binaries for production");
+                Ok(Value::Int(-1))
+            }
+            "phprs_pclose" => {
+                if args.len() != 1 { return Err("phprs_pclose() expects 1 argument".into()); }
+                Ok(Value::Int(-1))
+            }
+            "phprs_getpid" => {
+                Ok(Value::Int(std::process::id() as i64))
+            }
+            "phprs_posix_kill" => {
+                if args.len() != 2 { return Err("phprs_posix_kill() expects 2 arguments".into()); }
+                #[cfg(unix)]
+                {
+                    match (&args[0], &args[1]) {
+                        (Value::Int(pid), Value::Int(sig)) => {
+                            let ret = unsafe { libc::kill(*pid as i32, *sig as i32) };
+                            Ok(Value::Int(if ret == 0 { 1 } else { 0 }))
+                        }
+                        _ => Err("phprs_posix_kill() expects (int, int)".into()),
+                    }
+                }
+                #[cfg(not(unix))]
+                {
+                    Ok(Value::Int(0))
+                }
+            }
+
+            // ---- Stdin / Environment / Exit ----
+            "phprs_readline" => {
+                let prompt = if !args.is_empty() {
+                    match &args[0] { Value::String_(s) => s.clone(), _ => String::new() }
+                } else { String::new() };
+                if !prompt.is_empty() {
+                    eprint!("{}", prompt);
+                }
+                let mut line = String::new();
+                match std::io::stdin().read_line(&mut line) {
+                    Ok(_) => {
+                        while line.ends_with('\n') || line.ends_with('\r') { line.pop(); }
+                        Ok(Value::String_(line))
+                    }
+                    Err(_) => Ok(Value::String_(String::new())),
+                }
+            }
+            "phprs_fgets_stdin" => {
+                let mut line = String::new();
+                match std::io::stdin().read_line(&mut line) {
+                    Ok(_) => {
+                        while line.ends_with('\n') || line.ends_with('\r') { line.pop(); }
+                        Ok(Value::String_(line))
+                    }
+                    Err(_) => Ok(Value::String_(String::new())),
+                }
+            }
+            "phprs_stdin_read" => {
+                if args.len() != 1 { return Err("phprs_stdin_read() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::Int(n) if *n > 0 => {
+                        use std::io::Read;
+                        let mut buf = vec![0u8; *n as usize];
+                        let read = std::io::stdin().read(&mut buf).unwrap_or(0);
+                        buf.truncate(read);
+                        Ok(Value::String_(String::from_utf8_lossy(&buf).to_string()))
+                    }
+                    _ => Ok(Value::String_(String::new())),
+                }
+            }
+            "phprs_stdin_eof" => {
+                Ok(Value::Bool(false))
+            }
+            "phprs_getenv" => {
+                if args.len() != 1 { return Err("phprs_getenv() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::String_(name) => {
+                        Ok(Value::String_(std::env::var(name).unwrap_or_default()))
+                    }
+                    _ => Err("phprs_getenv() expects a string".into()),
+                }
+            }
+            "phprs_putenv" => {
+                if args.len() != 1 { return Err("phprs_putenv() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::String_(pair) => {
+                        if let Some(eq_pos) = pair.find('=') {
+                            let key = &pair[..eq_pos];
+                            let val = &pair[eq_pos+1..];
+                            std::env::set_var(key, val);
+                            Ok(Value::Bool(true))
+                        } else {
+                            Ok(Value::Bool(false))
+                        }
+                    }
+                    _ => Err("phprs_putenv() expects a string".into()),
+                }
+            }
+            "phprs_exit" => {
+                if args.is_empty() {
+                    std::process::exit(0);
+                }
+                match &args[0] {
+                    Value::Int(code) => std::process::exit(*code as i32),
+                    _ => std::process::exit(0),
+                }
+            }
+
+            // ---- Daemonize / Signal ----
+            "phprs_daemonize" => {
+                #[cfg(unix)]
+                {
+                    eprintln!("[phprs warning] phprs_daemonize() called in interpreter mode — no-op");
+                }
+                Ok(Value::Int(-1))
+            }
+            "phprs_signal" => {
+                if args.len() != 2 { return Err("phprs_signal() expects 2 arguments".into()); }
+                Ok(Value::Null)
+            }
+            "phprs_signal_check" => {
+                if args.len() != 1 { return Err("phprs_signal_check() expects 1 argument".into()); }
+                Ok(Value::Int(0))
+            }
+            "phprs_signal_clear" => {
+                if args.len() != 1 { return Err("phprs_signal_clear() expects 1 argument".into()); }
+                Ok(Value::Null)
+            }
+            "phprs_setuid" => {
+                if args.len() != 1 { return Err("phprs_setuid() expects 1 argument".into()); }
+                Ok(Value::Int(0))
+            }
+            "phprs_chroot" => {
+                if args.len() != 1 { return Err("phprs_chroot() expects 1 argument".into()); }
+                Ok(Value::Int(0))
+            }
+
+            // ---- UDP Socket ----
+            "phprs_udp_socket" => {
+                use std::net::UdpSocket;
+                match UdpSocket::bind("0.0.0.0:0") {
+                    Ok(sock) => {
+                        self.socket_counter += 1;
+                        let fd = self.socket_counter;
+                        self.sockets.insert(fd, SocketWrapper::Udp(sock));
+                        Ok(Value::Int(fd))
+                    }
+                    Err(_) => Ok(Value::Int(-1)),
+                }
+            }
+            "phprs_udp_bind" => {
+                if args.len() != 2 { return Err("phprs_udp_bind() expects 2 arguments".into()); }
+                match (&args[0], &args[1]) {
+                    (Value::Int(_fd), Value::Int(port)) => {
+                        use std::net::UdpSocket;
+                        match UdpSocket::bind(format!("0.0.0.0:{}", port)) {
+                            Ok(sock) => {
+                                self.socket_counter += 1;
+                                let fd = self.socket_counter;
+                                self.sockets.insert(fd, SocketWrapper::Udp(sock));
+                                Ok(Value::Int(fd))
+                            }
+                            Err(_) => Ok(Value::Int(-1)),
+                        }
+                    }
+                    _ => Err("phprs_udp_bind() expects (int, int)".into()),
+                }
+            }
+            "phprs_udp_sendto" => {
+                if args.len() != 4 { return Err("phprs_udp_sendto() expects 4 arguments".into()); }
+                match (&args[0], &args[1], &args[2], &args[3]) {
+                    (Value::Int(fd), Value::String_(data), Value::String_(host), Value::Int(port)) => {
+                        match self.sockets.get(fd) {
+                            Some(SocketWrapper::Udp(sock)) => {
+                                let addr = format!("{}:{}", host, port);
+                                match sock.send_to(data.as_bytes(), &addr) {
+                                    Ok(n) => Ok(Value::Int(n as i64)),
+                                    Err(_) => Ok(Value::Int(-1)),
+                                }
+                            }
+                            _ => Ok(Value::Int(-1)),
+                        }
+                    }
+                    _ => Err("phprs_udp_sendto() expects (int, string, string, int)".into()),
+                }
+            }
+            "phprs_udp_recvfrom" => {
+                if args.len() != 2 { return Err("phprs_udp_recvfrom() expects 2 arguments".into()); }
+                match (&args[0], &args[1]) {
+                    (Value::Int(fd), Value::Int(maxsize)) => {
+                        match self.sockets.get(fd) {
+                            Some(SocketWrapper::Udp(sock)) => {
+                                let mut buf = vec![0u8; *maxsize as usize];
+                                match sock.recv_from(&mut buf) {
+                                    Ok((n, addr)) => {
+                                        buf.truncate(n);
+                                        let data = String::from_utf8_lossy(&buf).to_string();
+                                        let json = format!(
+                                            "{{\"data\":\"{}\",\"host\":\"{}\",\"port\":{}}}",
+                                            data, addr.ip(), addr.port()
+                                        );
+                                        Ok(Value::String_(json))
+                                    }
+                                    Err(_) => Ok(Value::String_("{\"data\":\"\",\"host\":\"\",\"port\":0}".to_string())),
+                                }
+                            }
+                            _ => Ok(Value::String_("{\"data\":\"\",\"host\":\"\",\"port\":0}".to_string())),
+                        }
+                    }
+                    _ => Err("phprs_udp_recvfrom() expects (int, int)".into()),
+                }
+            }
+            "phprs_udp_close" => {
+                if args.len() != 1 { return Err("phprs_udp_close() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::Int(fd) => { self.sockets.remove(fd); Ok(Value::Null) }
+                    _ => Err("phprs_udp_close() expects an int".into()),
+                }
+            }
+
+            // ---- Enhanced Filesystem ----
+            "phprs_chdir" => {
+                if args.len() != 1 { return Err("phprs_chdir() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::String_(path) => {
+                        Ok(Value::Int(if std::env::set_current_dir(path).is_ok() { 1 } else { 0 }))
+                    }
+                    _ => Err("phprs_chdir() expects a string".into()),
+                }
+            }
+            "phprs_rmdir" => {
+                if args.len() != 1 { return Err("phprs_rmdir() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::String_(path) => {
+                        Ok(Value::Int(if std::fs::remove_dir(path).is_ok() { 1 } else { 0 }))
+                    }
+                    _ => Err("phprs_rmdir() expects a string".into()),
+                }
+            }
+            "phprs_glob" => {
+                if args.len() != 1 { return Err("phprs_glob() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::String_(pattern) => {
+                        let mut results = Vec::new();
+                        if let Ok(paths) = glob::glob(pattern) {
+                            for entry in paths.flatten() {
+                                results.push(format!("\"{}\"", entry.display()));
+                            }
+                        }
+                        Ok(Value::String_(format!("[{}]", results.join(","))))
+                    }
+                    _ => Err("phprs_glob() expects a string".into()),
+                }
+            }
+            "phprs_chmod" => {
+                if args.len() != 2 { return Err("phprs_chmod() expects 2 arguments".into()); }
+                #[cfg(unix)]
+                {
+                    match (&args[0], &args[1]) {
+                        (Value::String_(path), Value::Int(mode)) => {
+                            use std::os::unix::fs::PermissionsExt;
+                            let perms = std::fs::Permissions::from_mode(*mode as u32);
+                            Ok(Value::Int(if std::fs::set_permissions(path, perms).is_ok() { 1 } else { 0 }))
+                        }
+                        _ => Err("phprs_chmod() expects (string, int)".into()),
+                    }
+                }
+                #[cfg(not(unix))]
+                {
+                    Ok(Value::Int(0))
+                }
+            }
+            "phprs_tempnam" => {
+                if args.len() != 2 { return Err("phprs_tempnam() expects 2 arguments".into()); }
+                match (&args[0], &args[1]) {
+                    (Value::String_(dir), Value::String_(prefix)) => {
+                        let path = std::env::temp_dir().join(format!("{}{}", prefix, std::process::id()));
+                        let full = if dir.is_empty() {
+                            path
+                        } else {
+                            std::path::PathBuf::from(dir).join(format!("{}{}", prefix, std::process::id()))
+                        };
+                        std::fs::write(&full, "").ok();
+                        Ok(Value::String_(full.to_string_lossy().to_string()))
+                    }
+                    _ => Err("phprs_tempnam() expects (string, string)".into()),
+                }
+            }
+            "phprs_file_append" => {
+                if args.len() != 2 { return Err("phprs_file_append() expects 2 arguments".into()); }
+                match (&args[0], &args[1]) {
+                    (Value::String_(path), Value::String_(data)) => {
+                        use std::io::Write;
+                        match std::fs::OpenOptions::new().append(true).create(true).open(path) {
+                            Ok(mut f) => {
+                                match f.write_all(data.as_bytes()) {
+                                    Ok(_) => Ok(Value::Int(data.len() as i64)),
+                                    Err(_) => Ok(Value::Int(-1)),
+                                }
+                            }
+                            Err(_) => Ok(Value::Int(-1)),
+                        }
+                    }
+                    _ => Err("phprs_file_append() expects (string, string)".into()),
+                }
+            }
+
+            // ---- Raw Socket Enhancements ----
+            "phprs_socket_set_timeout" => {
+                if args.len() != 2 { return Err("phprs_socket_set_timeout() expects 2 arguments".into()); }
+                match (&args[0], &args[1]) {
+                    (Value::Int(fd), Value::Int(sec)) => {
+                        if let Some(sock) = self.sockets.get(fd) {
+                            let dur = Some(std::time::Duration::from_secs(*sec as u64));
+                            match sock {
+                                SocketWrapper::Tcp(s) => { let _ = s.set_read_timeout(dur); let _ = s.set_write_timeout(dur); }
+                                _ => {}
+                            }
+                        }
+                        Ok(Value::Null)
+                    }
+                    _ => Err("phprs_socket_set_timeout() expects (int, int)".into()),
+                }
+            }
+            "phprs_socket_read_bytes" => {
+                if args.len() != 2 { return Err("phprs_socket_read_bytes() expects 2 arguments".into()); }
+                match (&args[0], &args[1]) {
+                    (Value::Int(fd), Value::Int(n)) => {
+                        use std::io::Read;
+                        match self.sockets.get_mut(fd) {
+                            Some(stream) => {
+                                let mut buf = vec![0u8; *n as usize];
+                                let mut total = 0;
+                                while total < *n as usize {
+                                    match stream.read(&mut buf[total..]) {
+                                        Ok(0) => break,
+                                        Ok(r) => total += r,
+                                        Err(_) => break,
+                                    }
+                                }
+                                buf.truncate(total);
+                                Ok(Value::String_(String::from_utf8_lossy(&buf).to_string()))
+                            }
+                            None => Ok(Value::String_(String::new())),
+                        }
+                    }
+                    _ => Err("phprs_socket_read_bytes() expects (int, int)".into()),
+                }
+            }
+            "phprs_socket_peek" => {
+                if args.len() != 2 { return Err("phprs_socket_peek() expects 2 arguments".into()); }
+                match (&args[0], &args[1]) {
+                    (Value::Int(fd), Value::Int(n)) => {
+                        match self.sockets.get(fd) {
+                            Some(SocketWrapper::Tcp(s)) => {
+                                use std::os::unix::io::AsRawFd;
+                                let mut buf = vec![0u8; *n as usize];
+                                let raw_fd = s.as_raw_fd();
+                                let r = unsafe { libc::recv(raw_fd, buf.as_mut_ptr() as *mut _, *n as usize, libc::MSG_PEEK) };
+                                if r > 0 {
+                                    buf.truncate(r as usize);
+                                    Ok(Value::String_(String::from_utf8_lossy(&buf).to_string()))
+                                } else {
+                                    Ok(Value::String_(String::new()))
+                                }
+                            }
+                            _ => Ok(Value::String_(String::new())),
+                        }
+                    }
+                    _ => Err("phprs_socket_peek() expects (int, int)".into()),
+                }
+            }
+            "phprs_socket_available" => {
+                if args.len() != 1 { return Err("phprs_socket_available() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::Int(fd) => {
+                        match self.sockets.get(fd) {
+                            Some(SocketWrapper::Tcp(s)) => {
+                                use std::os::unix::io::AsRawFd;
+                                let raw_fd = s.as_raw_fd();
+                                let mut avail: libc::c_int = 0;
+                                unsafe { libc::ioctl(raw_fd, libc::FIONREAD, &mut avail) };
+                                Ok(Value::Int(avail as i64))
+                            }
+                            _ => Ok(Value::Int(0)),
+                        }
+                    }
+                    _ => Err("phprs_socket_available() expects an int".into()),
+                }
+            }
             // ---- String Validation ----
             "phprs_str_is_alnum" => {
                 if args.len() != 1 { return Err("phprs_str_is_alnum() expects 1 argument".into()); }
@@ -4505,6 +4937,25 @@ impl Interpreter {
             | "phprs_ws_manager_init" | "phprs_ws_register" | "phprs_ws_unregister"
             | "phprs_ws_update_pong" | "phprs_ws_broadcast" | "phprs_ws_broadcast_all"
             | "phprs_ws_count" | "phprs_ws_rooms" | "phprs_ws_start_heartbeat"
+            // Process execution
+            | "phprs_exec" | "phprs_shell_exec" | "phprs_system"
+            | "phprs_popen" | "phprs_pclose"
+            | "phprs_getpid" | "phprs_posix_kill"
+            // Stdin / Environment / Exit
+            | "phprs_readline" | "phprs_fgets_stdin" | "phprs_stdin_read" | "phprs_stdin_eof"
+            | "phprs_getenv" | "phprs_putenv" | "phprs_exit"
+            // Daemonize / Signal
+            | "phprs_daemonize" | "phprs_signal" | "phprs_signal_check" | "phprs_signal_clear"
+            | "phprs_setuid" | "phprs_chroot"
+            // UDP Socket
+            | "phprs_udp_socket" | "phprs_udp_bind" | "phprs_udp_sendto"
+            | "phprs_udp_recvfrom" | "phprs_udp_close"
+            // Enhanced Filesystem
+            | "phprs_chdir" | "phprs_rmdir" | "phprs_glob" | "phprs_chmod"
+            | "phprs_tempnam" | "phprs_file_append"
+            // Raw Socket Enhancements
+            | "phprs_socket_set_timeout" | "phprs_socket_read_bytes"
+            | "phprs_socket_peek" | "phprs_socket_available"
         )
     }
 

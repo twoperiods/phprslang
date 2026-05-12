@@ -328,6 +328,47 @@ impl CTranspiler {
             ("phprs_ws_count", "int64_t"),
             ("phprs_ws_rooms", "const char*"),
             ("phprs_ws_start_heartbeat", "void"),
+            // Process execution
+            ("phprs_exec", "const char*"),
+            ("phprs_shell_exec", "const char*"),
+            ("phprs_system", "int64_t"),
+            ("phprs_popen", "int64_t"),
+            ("phprs_pclose", "int64_t"),
+            ("phprs_getpid", "int64_t"),
+            ("phprs_posix_kill", "int64_t"),
+            // Stdin / Environment / Exit
+            ("phprs_readline", "const char*"),
+            ("phprs_fgets_stdin", "const char*"),
+            ("phprs_stdin_read", "const char*"),
+            ("phprs_stdin_eof", "int64_t"),
+            ("phprs_getenv", "const char*"),
+            ("phprs_putenv", "int64_t"),
+            ("phprs_exit", "void"),
+            // Daemonize / Signal
+            ("phprs_daemonize", "int64_t"),
+            ("phprs_signal", "void"),
+            ("phprs_signal_check", "int64_t"),
+            ("phprs_signal_clear", "void"),
+            ("phprs_setuid", "int64_t"),
+            ("phprs_chroot", "int64_t"),
+            // UDP Socket
+            ("phprs_udp_socket", "int64_t"),
+            ("phprs_udp_bind", "int64_t"),
+            ("phprs_udp_sendto", "int64_t"),
+            ("phprs_udp_recvfrom", "const char*"),
+            ("phprs_udp_close", "void"),
+            // Enhanced Filesystem
+            ("phprs_chdir", "int64_t"),
+            ("phprs_rmdir", "int64_t"),
+            ("phprs_glob", "const char*"),
+            ("phprs_chmod", "int64_t"),
+            ("phprs_tempnam", "const char*"),
+            ("phprs_file_append", "int64_t"),
+            // Raw Socket Enhancements
+            ("phprs_socket_set_timeout", "void"),
+            ("phprs_socket_read_bytes", "const char*"),
+            ("phprs_socket_peek", "const char*"),
+            ("phprs_socket_available", "int64_t"),
         ];
         for (name, ret) in builtins {
             if !self.func_return_types.contains_key(name) {
